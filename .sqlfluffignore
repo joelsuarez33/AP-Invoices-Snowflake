@@ -1,0 +1,8 @@
+target/
+dbt_packages/
+logs/
+# Los macros son definiciones jinja, no consultas: sqlfluff los carga como
+# libreria (load_macros_from_path) en vez de lintearlos como SQL.
+dbt_ap/macros/
+# Un bloque {% snapshot %} no es SQL parseable fuera de dbt.
+dbt_ap/snapshots/

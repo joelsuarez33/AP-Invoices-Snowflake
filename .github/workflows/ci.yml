@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint y parse
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      # Valores de relleno, NO secretos. profiles.yml resuelve todo por env_var()
+      # sin fallback, asi que dbt necesita que las variables existan para
+      # renderizar el perfil -- pero `dbt parse` no abre ninguna conexion, y
+      # estos nombres no dan acceso a nada.
+      DBT_PROFILES_DIR: dbt_ap
+      SNOWFLAKE_ACCOUNT: parse-only
+      SNOWFLAKE_USER: parse-only
+      SNOWFLAKE_ROLE: AP_PIPELINE
+      SNOWFLAKE_WAREHOUSE: AP_WH
+      SNOWFLAKE_DATABASE: AP_ANALYTICS
+      SNOWFLAKE_SCHEMA_RAW: RAW
+      SNOWFLAKE_SCHEMA_ANALYTICS: ANALYTICS
+      SNOWFLAKE_PRIVATE_KEY_PATH: /dev/null
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Instalar dependencias
+        run: pip install --disable-pip-version-check -r requirements.txt
+
+      - name: ruff
+        run: ruff check .
+
+      - name: sqlfluff
+        # Templater jinja, no el de dbt: linteamos el SQL sin conexion y sin
+        # resolver paquetes, para que un PR desde un fork tambien pase.
+        run: sqlfluff lint dbt_ap/models dbt_ap/tests
+
+      - name: dbt deps
+        working-directory: dbt_ap
+        run: dbt deps
+
+      - name: dbt parse
+        # Valida jinja, refs, sources, exposures y el YAML de tests, todo sin
+        # tocar Snowflake. Es la barrera real de este workflow.
+        working-directory: dbt_ap
+        run: dbt parse
+
+      - name: Detectar si hay credenciales disponibles
+        id: creds
+        env:
+          ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+        run: |
+          # Solo se publica si la variable esta o no esta. Nunca su valor.
+          if [ -n "$ACCOUNT" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: dbt compile
+        # A diferencia de parse, compile SI abre conexion: para resolver
+        # is_incremental() necesita preguntarle al warehouse si la relacion
+        # existe. Por eso el paso queda condicionado a que haya credenciales --
+        # en un PR desde un fork no las hay, y el workflow igual valida todo lo
+        # anterior en vez de fallar por algo que el autor del PR no controla.
+        if: steps.creds.outputs.available == 'true'
+        working-directory: dbt_ap
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
+          SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
+          SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
+          SNOWFLAKE_SCHEMA_RAW: ${{ vars.SNOWFLAKE_SCHEMA_RAW }}
+          SNOWFLAKE_SCHEMA_ANALYTICS: ${{ vars.SNOWFLAKE_SCHEMA_ANALYTICS }}
+          SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+          SNOWFLAKE_PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
+        run: dbt compile --target ci
+
+      # Slim CI: una vez que pipeline.yml haya publicado un manifest en la rama
+      # artifacts, este paso permite construir solo lo que cambio.
+      #
+      #   - name: Descargar manifest de produccion
+      #     run: |
+      #       git fetch origin artifacts
+      #       git show origin/artifacts:dbt/manifest.json > dbt_ap/state/manifest.json
+      #   - name: dbt build incremental
+      #     working-directory: dbt_ap
+      #     run: dbt build --target ci --select state:modified+ --state state/

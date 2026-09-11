@@ -1,0 +1,63 @@
+version: 2
+
+sources:
+  - name: sap_fi
+    description: >
+      Aterrizaje append-only del change feed de la transaccion FBL1N (partidas
+      individuales de acreedores). Una fila por cada vez que un documento
+      aparecio en un extracto: la version original y cada re-emision. Nada se
+      borra ni se sobrescribe.
+    database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
+    schema: "{{ env_var('SNOWFLAKE_SCHEMA_RAW') }}"
+    loader: load.py (PUT + COPY INTO)
+
+    freshness:
+      # El cron corre de lunes a viernes: el lunes a la manana el ultimo
+      # extracto es del viernes, casi 72 horas antes. El error recien salta
+      # cuando se perdio mas de un dia habil completo.
+      warn_after: {count: 30, period: hour}
+      error_after: {count: 96, period: hour}
+    loaded_at_field: _LOADED_AT
+
+    tables:
+      - name: fbl1n_items
+        description: >
+          Partidas del ledger de acreedores tal como las emitio el report.
+          Todas las columnas de negocio son STRING: el casteo es
+          responsabilidad exclusiva de stg_fbl1n__items.
+        columns:
+          - name: BELNR
+            description: Numero de documento. Estable entre re-emisiones -- es la clave del merge.
+            data_tests:
+              - not_null
+          - name: KIDNO
+            description: Clave de referencia de pago. Estable junto con BELNR.
+            data_tests:
+              - not_null
+          - name: LIFNR
+            description: Acreedor.
+            data_tests:
+              - not_null
+          - name: DMBTR
+            description: Importe en moneda local. Unico importe agregable cuando hay monedas mezcladas.
+            data_tests:
+              - not_null
+          - name: _SOURCE_FILE
+            description: METADATA$FILENAME del archivo que origino la fila.
+            data_tests:
+              - not_null
+          - name: _FILE_ROW_NUMBER
+            description: Posicion dentro del archivo. Desempata cuando dos filas comparten _EXTRACT_DATE.
+            data_tests:
+              - not_null
+          - name: _LOADED_AT
+            description: Momento del COPY INTO. Campo de freshness.
+            data_tests:
+              - not_null
+          - name: _EXTRACT_DATE
+            description: >
+              Fecha del extracto, parseada del nombre del archivo y no de la
+              fecha de carga: un re-proceso no debe alterar el orden del change
+              feed.
+            data_tests:
+              - not_null

@@ -1,0 +1,181 @@
+name: Pipeline diario
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # 09:00 UTC, lunes a viernes. El ledger no se mueve el fin de semana.
+    - cron: '0 9 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'Backfill: cantidad de dias consecutivos a generar'
+        required: false
+        type: string
+      until:
+        description: 'Backfill: generar hasta esta fecha inclusive (YYYY-MM-DD)'
+        required: false
+        type: string
+
+# Nunca dos corridas a la vez: las dos escribirian _state.json y RAW en
+# paralelo, y la segunda partiria de un estado que la primera todavia no cerro.
+concurrency:
+  group: ap-pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    name: generate -> normalize -> load -> dbt -> export
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      DBT_PROFILES_DIR: dbt_ap
+      # Nombres de objetos: no son secretos, viven como repository variables.
+      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_SCHEMA_RAW: ${{ vars.SNOWFLAKE_SCHEMA_RAW }}
+      SNOWFLAKE_SCHEMA_ANALYTICS: ${{ vars.SNOWFLAKE_SCHEMA_ANALYTICS }}
+      SNOWFLAKE_STAGE: ${{ vars.SNOWFLAKE_STAGE }}
+      SNOWFLAKE_FILE_FORMAT: ${{ vars.SNOWFLAKE_FILE_FORMAT }}
+      SNOWFLAKE_RAW_TABLE: ${{ vars.SNOWFLAKE_RAW_TABLE }}
+      # Credenciales: solo estas cuatro son secretos reales.
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+      SNOWFLAKE_PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # El publicador de artefactos crea ramas y worktrees: necesita el
+          # historial completo, no un shallow clone.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Instalar dependencias
+        run: pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Restaurar el estado del generador
+        # El repo versiona el estado inicial, del 2026-09-06. El estado vigente
+        # lo publica cada corrida en la rama artifacts. Sin este paso, cada
+        # ejecucion volveria a arrancar desde el dia uno del ledger.
+        run: |
+          set -euo pipefail
+          if git fetch --depth=1 origin artifacts 2>/dev/null \
+             && git cat-file -e FETCH_HEAD:state/_state.json 2>/dev/null; then
+            git show FETCH_HEAD:state/_state.json > landing/_state.json
+            echo "Estado restaurado de la rama artifacts."
+          else
+            echo "Sin estado publicado: se usa el estado inicial del repo."
+          fi
+          python -c "import json,pathlib; s=json.loads(pathlib.Path('landing/_state.json').read_text()); print('last_run_date:', s['last_run_date'], '| abiertas:', s['open_items'])"
+
+      - name: Generar el change feed
+        run: |
+          set -euo pipefail
+          ARGS=""
+          if [ -n "${{ inputs.until }}" ]; then
+            ARGS="--until ${{ inputs.until }}"
+          elif [ -n "${{ inputs.days }}" ]; then
+            ARGS="--days ${{ inputs.days }}"
+          fi
+          # Sin argumentos genera el dia siguiente a last_run_date. Si el ledger
+          # ya llego a la fecha del sistema, el generador sale con error: es
+          # deliberado, un extracto no puede tener fecha futura.
+          python generate_extract.py $ARGS
+
+      - name: Normalizar y validar checksums
+        # Sin argumentos procesa todos los extractos que todavia no tienen CSV,
+        # en orden cronologico: un backfill de 60 dias entra en una invocacion.
+        run: python normalize.py
+
+      - name: Ingestar en RAW
+        # Una sola conexion y un solo COPY para todos los archivos pendientes.
+        # Cada resume del warehouse factura 60 segundos como minimo.
+        run: python load.py
+
+      - name: dbt deps
+        working-directory: dbt_ap
+        run: dbt deps
+
+      - name: dbt build
+        # build = seed + snapshot + run + test, en orden de dependencias y
+        # cortando en el primer fallo. Los tests de invariantes y el de
+        # reconciliacion contra RAW frenan la publicacion si algo no cuadra.
+        working-directory: dbt_ap
+        run: dbt build --target ci
+
+      - name: Exportar los datasets del tablero
+        run: python export_mart.py
+
+      - name: Publicar estado y artefactos
+        # Este commit cumple tres funciones:
+        #   1. Persiste _state.json para la corrida siguiente.
+        #   2. Deja manifest.json para el Slim CI (--select state:modified+).
+        #   3. Mantiene el repo activo: GitHub deshabilita los cron despues de
+        #      60 dias sin actividad, y un pipeline que se apaga solo es peor
+        #      que uno que nunca existio.
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          if git fetch origin artifacts 2>/dev/null; then
+            git branch -f artifacts FETCH_HEAD
+          else
+            # Primera corrida: rama huerfana sobre el arbol vacio.
+            EMPTY_TREE=$(git hash-object -t tree /dev/null)
+            git branch -f artifacts "$(git commit-tree "$EMPTY_TREE" -m 'artifacts: rama inicial')"
+          fi
+
+          WORKTREE="$RUNNER_TEMP/artifacts"
+          git worktree add "$WORKTREE" artifacts
+
+          install -D -m 644 landing/_state.json            "$WORKTREE/state/_state.json"
+          install -D -m 644 dbt_ap/target/run_results.json "$WORKTREE/dbt/run_results.json"
+          install -D -m 644 dbt_ap/target/manifest.json    "$WORKTREE/dbt/manifest.json"
+
+          cd "$WORKTREE"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Sin cambios que publicar."
+          else
+            LAST_RUN=$(python -c "import json,pathlib; print(json.loads(pathlib.Path('state/_state.json').read_text())['last_run_date'])")
+            git commit -m "pipeline: ledger al $LAST_RUN (run ${{ github.run_number }})"
+            git push origin artifacts
+          fi
+
+      - name: Publicar los datasets del tablero
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add web/public/data
+          if git diff --cached --quiet; then
+            echo "Los datasets no cambiaron."
+          else
+            git commit -m "tablero: datasets al $(date -u +%Y-%m-%d) [skip ci]"
+            git push origin HEAD:${{ github.ref_name }}
+          fi
+
+      - name: Resultados de dbt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbt-target-${{ github.run_number }}
+          path: |
+            dbt_ap/target/run_results.json
+            dbt_ap/target/manifest.json
+            dbt_ap/logs/dbt.log
+          retention-days: 14
+          if-no-files-found: warn

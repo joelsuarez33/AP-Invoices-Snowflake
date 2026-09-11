@@ -1,0 +1,6 @@
+packages:
+  # Solo se usa para tests genericos declarados en YAML (expression_is_true).
+  # Los modelos no invocan macros del paquete a proposito: mantiene el SQL
+  # linteable con el templater jinja de sqlfluff, sin depender de dbt deps.
+  - package: dbt-labs/dbt_utils
+    version: [">=1.3.0", "<2.0.0"]

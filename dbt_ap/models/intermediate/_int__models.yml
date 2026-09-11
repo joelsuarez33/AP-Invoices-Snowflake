@@ -1,0 +1,102 @@
+version: 2
+
+models:
+  - name: int_ap_items_enriched
+    description: >
+      Partidas unidas a los tres maestros (acreedores, clases de documento y
+      serie FX) con la fecha de corte del ledger fijada en una columna. Grano:
+      una fila por BELNR.
+    columns:
+      - name: belnr
+        data_tests:
+          - unique
+          - not_null
+      - name: lifnr
+        data_tests:
+          - not_null
+      - name: vendor_name
+        data_tests:
+          - not_null
+      - name: fx_rate_at_document_date
+        description: Cotizacion vigente a la fecha del documento. Explica la relacion WRBTR/DMBTR del origen.
+        data_tests:
+          - not_null:
+              config:
+                # Si falta una cotizacion, la serie FX no cubre el rango de
+                # fechas del ledger y hay que ampliar el seed.
+                severity: error
+      - name: ledger_cutoff_date
+        description: Ultimo _extract_date ingestado. Referencia temporal de todo el modelo.
+        data_tests:
+          - not_null
+      - name: debit_credit_indicator
+        description: Indicador derivado del signo del importe.
+      - name: expected_debit_credit_indicator
+        description: Indicador que declara el maestro de clases de documento.
+
+  - name: int_ap_aging
+    description: >
+      Antiguedad recalculada de cada partida contra la fecha de corte del
+      ledger. No usa VERZN. Los dias pueden ser negativos: hay pagos
+      anticipados. Grano: una fila por BELNR.
+    columns:
+      - name: belnr
+        data_tests:
+          - unique
+          - not_null
+      - name: days_overdue
+        description: >
+          Dias entre el vencimiento neto y la fecha de referencia (AUGDT si la
+          partida se compenso, fecha de corte si sigue abierta). Negativo =
+          pagada o aun no vencida.
+        data_tests:
+          - not_null
+      - name: days_outstanding
+        description: Dias entre la contabilizacion y la fecha de referencia.
+      - name: credit_period_days
+        description: Plazo real que otorgo el documento (NETDT - BLDAT).
+        data_tests:
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+              config:
+                severity: error
+      - name: aging_bucket
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['Sin vencimiento', 'No vencida', 'Vence hoy', '1-30', '31-60', '61-90', '90+']
+      - name: aging_bucket_sort
+        data_tests:
+          - not_null
+      - name: verzn_drift_days
+        description: >
+          Diferencia entre el aging recalculado y el VERZN que imprimio el
+          report. Distinto de cero es lo esperado -- el report se ejecuto otro
+          dia -- y sirve para explicar la brecha contra la pantalla de SAP.
+
+  - name: int_ap_fx_revaluation
+    description: >
+      Exposicion cambiaria de las partidas abiertas en moneda extranjera:
+      diferencia entre el importe contabilizado (WRBTR al tipo de cambio del
+      documento) y el mismo importe a la cotizacion de la fecha de corte.
+      Grano: una fila por BELNR abierto en moneda distinta de la local.
+    columns:
+      - name: belnr
+        data_tests:
+          - unique
+          - not_null
+      - name: waers
+        data_tests:
+          - accepted_values:
+              values: ['USD', 'EUR']
+      - name: fx_rate_at_cutoff
+        data_tests:
+          - not_null
+      - name: fx_revaluation_local
+        description: Negativo = el pasivo en moneda local crecio (perdida por diferencia de cambio).
+        data_tests:
+          - not_null
+      - name: fx_result_local
+        description: "El mismo numero con signo de resultado: positivo = ganancia."
+        data_tests:
+          - not_null

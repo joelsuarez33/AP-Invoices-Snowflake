@@ -1,0 +1,5 @@
+blart,description,debit_credit_indicator,is_invoice
+KR,Factura de acreedor,H,True
+RE,Factura logistica (MM),H,True
+KG,Nota de credito,S,False
+KZ,Pago saliente,S,False

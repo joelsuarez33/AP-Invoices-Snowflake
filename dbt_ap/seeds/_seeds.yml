@@ -1,0 +1,75 @@
+version: 2
+
+seeds:
+  - name: vendors
+    description: >
+      Maestro de acreedores. Cardinalidad chica y estable: entra al repo como
+      seed en vez de como tabla cargada, para que un cambio de condicion de pago
+      quede en el historial de git y sea revisable en un PR.
+    columns:
+      - name: lifnr
+        description: Numero de acreedor.
+        data_tests:
+          - unique
+          - not_null
+      - name: vendor_name
+        data_tests:
+          - not_null
+      - name: country
+        description: Pais del acreedor (ISO 2).
+        data_tests:
+          - not_null
+      - name: payment_terms
+        description: Condicion de pago (ZTERM). El numero de dias esta en el codigo.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['Z015', 'Z030', 'Z045', 'Z060']
+      - name: purchasing_group
+        data_tests:
+          - not_null
+
+  - name: fx_rates
+    description: >
+      Serie diaria de tipos de cambio contra la moneda local del ledger, del
+      2026-03-01 al 2027-06-30. Unica fuente de conversion del proyecto: ni el
+      generador ni los modelos calculan una cotizacion por su cuenta.
+    columns:
+      - name: rate_date
+        data_tests:
+          - not_null
+      - name: currency
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['ARS', 'USD', 'EUR']
+      - name: rate_to_ars
+        description: Unidades de moneda local por unidad de moneda extranjera.
+        data_tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+              config:
+                severity: error
+
+  - name: document_types
+    description: Clases de documento del ledger de acreedores y su indicador debe/haber.
+    columns:
+      - name: blart
+        data_tests:
+          - unique
+          - not_null
+          - accepted_values:
+              values: ['KR', 'RE', 'KG', 'KZ']
+      - name: description
+        data_tests:
+          - not_null
+      - name: debit_credit_indicator
+        description: H (Haben) acredita al proveedor, S (Soll) lo debita.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['H', 'S']
+      - name: is_invoice
+        data_tests:
+          - not_null

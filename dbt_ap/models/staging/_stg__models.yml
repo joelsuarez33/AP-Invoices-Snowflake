@@ -1,0 +1,201 @@
+version: 2
+
+models:
+  - name: stg_fbl1n__items
+    description: >
+      Partidas del ledger de acreedores, casteadas y resueltas a estado actual.
+      Una fila por BELNR: el QUALIFY se queda con la ultima version que emitio
+      el change feed. El historial completo sigue estando en RAW.
+    columns:
+      - name: belnr
+        description: Numero de documento. Clave del modelo y del merge de la mart.
+        data_tests:
+          - unique:
+              config:
+                severity: error
+          - not_null:
+              config:
+                severity: error
+      - name: kidno
+        description: Clave de referencia de pago. Estable junto con BELNR entre re-emisiones.
+        data_tests:
+          - unique:
+              config:
+                severity: error
+          - not_null
+      - name: lifnr
+        description: Acreedor.
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('stg_ap__vendors')
+              field: lifnr
+              config:
+                severity: error
+      - name: xblnr
+        description: Referencia del proveedor (numero de factura del emisor).
+      - name: blart
+        description: Clase de documento.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['KR', 'RE', 'KG', 'KZ']
+              config:
+                severity: error
+          - relationships:
+              to: ref('stg_ap__document_types')
+              field: blart
+      - name: wrbtr
+        description: >
+          Importe en moneda de documento. NO agregable entre monedas: cualquier
+          suma sobre esta columna mezcla pesos, dolares y euros.
+      - name: waers
+        description: Moneda del documento.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['ARS', 'USD', 'EUR']
+              config:
+                severity: error
+          - relationships:
+              to: ref('stg_ap__fx_rates')
+              field: currency
+      - name: dmbtr
+        description: Importe en moneda local. Importe de referencia del ledger.
+        data_tests:
+          - not_null
+      - name: hwaer
+        description: Moneda local. Constante en este ledger.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['ARS']
+              config:
+                severity: error
+      - name: bldat
+        description: Fecha del documento.
+        data_tests:
+          - not_null
+      - name: budat
+        description: Fecha de contabilizacion.
+        data_tests:
+          - not_null
+      - name: netdt
+        description: Vencimiento neto.
+        data_tests:
+          - not_null
+      - name: augdt
+        description: Fecha de compensacion. NULL mientras la partida esta abierta.
+      - name: augbl
+        description: Documento de compensacion. Compartido por las partidas de una misma corrida de pagos.
+      - name: verzn_report_unreliable
+        description: >
+          Demora que imprimio el report al momento de ejecutarse. Campo de
+          origen NO confiable: depende de la fecha de ejecucion, no del
+          documento. Se conserva solo para reconciliar contra la pantalla de
+          SAP. El aging valido es el de int_ap_aging.
+      - name: is_open
+        description: Verdadero mientras no haya fecha de compensacion.
+        data_tests:
+          - not_null
+      - name: debit_credit_indicator
+        description: Indicador debe/haber derivado del signo del importe local.
+        data_tests:
+          - accepted_values:
+              values: ['H', 'S']
+      - name: icon_status
+        description: Columna de presentacion. La variante de layout la trae sin poblar.
+        data_tests:
+          # Si un dia empieza a venir poblada, cambio la variante aguas arriba.
+          # Warning y no error: no rompe nada, pero hay que enterarse.
+          - dbt_utils.expression_is_true:
+              expression: "is null"
+              config:
+                severity: warn
+      - name: xref1
+        description: Clave referencia 1. Sin poblar en esta variante.
+        data_tests:
+          - dbt_utils.expression_is_true:
+              expression: "is null"
+              config:
+                severity: warn
+      - name: zlsch
+        description: Via de pago. Sin poblar en esta variante.
+        data_tests:
+          - dbt_utils.expression_is_true:
+              expression: "is null"
+              config:
+                severity: warn
+      - name: zlspr
+        description: Bloqueo de pago. Sin poblar en esta variante.
+        data_tests:
+          - dbt_utils.expression_is_true:
+              expression: "is null"
+              config:
+                severity: warn
+      - name: _extract_date
+        description: Fecha del extracto que aporto esta version del documento.
+        data_tests:
+          - not_null
+
+  - name: stg_ap__vendors
+    description: Maestro de acreedores con la condicion de pago pactada en dias.
+    columns:
+      - name: lifnr
+        data_tests:
+          - unique
+          - not_null
+      - name: vendor_name
+        data_tests:
+          - not_null
+      - name: country
+        data_tests:
+          - not_null
+      - name: payment_terms
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['Z015', 'Z030', 'Z045', 'Z060']
+      - name: agreed_payment_days
+        description: Dias de plazo pactado extraidos del codigo de condicion.
+        data_tests:
+          - not_null
+
+  - name: stg_ap__fx_rates
+    description: Serie diaria de tipos de cambio contra la moneda local.
+    columns:
+      - name: rate_date
+        data_tests:
+          - not_null
+      - name: currency
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['ARS', 'USD', 'EUR']
+      - name: rate_to_local
+        data_tests:
+          - not_null
+    data_tests:
+      # No hay dos cotizaciones para la misma moneda y fecha: si las hubiera,
+      # el join de int_ap_items_enriched duplicaria partidas.
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - rate_date
+            - currency
+          config:
+            severity: error
+
+  - name: stg_ap__document_types
+    description: Clases de documento del ledger y su indicador debe/haber esperado.
+    columns:
+      - name: blart
+        data_tests:
+          - unique
+          - not_null
+      - name: expected_debit_credit_indicator
+        data_tests:
+          - accepted_values:
+              values: ['H', 'S']
+      - name: is_invoice
+        data_tests:
+          - not_null

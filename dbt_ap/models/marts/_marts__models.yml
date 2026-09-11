@@ -1,0 +1,223 @@
+version: 2
+
+models:
+  - name: fct_ap_open_items
+    description: >
+      Estado actual del ledger de acreedores, una fila por BELNR. Materializada
+      incremental con estrategia merge: el change feed re-emite documentos y el
+      merge los actualiza en su lugar. Incluye las partidas compensadas con el
+      flag is_open en falso -- filtrarlas dejaria filas huerfanas que el merge
+      nunca podria corregir.
+    columns:
+      - name: belnr
+        description: Numero de documento. Clave del merge.
+        data_tests:
+          - unique:
+              config:
+                severity: error
+          - not_null:
+              config:
+                severity: error
+      - name: kidno
+        description: Clave de referencia de pago.
+        data_tests:
+          - unique
+          - not_null
+      - name: lifnr
+        description: Acreedor.
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_vendor')
+              field: lifnr
+              config:
+                severity: error
+      - name: blart
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['KR', 'RE', 'KG', 'KZ']
+              config:
+                severity: error
+      - name: waers
+        description: Moneda del documento.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['ARS', 'USD', 'EUR']
+              config:
+                severity: error
+      - name: hwaer
+        description: Moneda local del ledger.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['ARS']
+              config:
+                severity: error
+      - name: wrbtr
+        description: >
+          Importe en moneda de documento. Presente para trazar contra el
+          documento original. NO sumar entre monedas.
+      - name: dmbtr
+        description: Importe en moneda local. Base de toda metrica agregada.
+        data_tests:
+          - not_null:
+              config:
+                severity: error
+      - name: bldat
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_day
+              config:
+                severity: error
+      - name: budat
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_day
+      - name: netdt
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_day
+      - name: augdt
+        description: Fecha de compensacion. NULL mientras la partida sigue abierta.
+        data_tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_day
+      - name: is_open
+        data_tests:
+          - not_null
+      - name: days_overdue
+        description: Dias de atraso recalculados. Negativo = pago anticipado o partida no vencida.
+        data_tests:
+          - not_null
+      - name: aging_bucket
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['Sin vencimiento', 'No vencida', 'Vence hoy', '1-30', '31-60', '61-90', '90+']
+      - name: fx_revaluation_local
+        description: >
+          Exposicion cambiaria a la fecha de corte. Solo poblada para partidas
+          abiertas en moneda extranjera; NULL en el resto por definicion.
+      - name: _extract_date
+        description: Fecha del extracto que aporto la version vigente. Gobierna el filtro incremental.
+        data_tests:
+          - not_null
+      - name: dbt_created_at
+        description: >
+          Primera vez que la fila entro a la mart. Excluida del UPDATE del merge
+          via merge_exclude_columns.
+        data_tests:
+          - not_null
+      - name: dbt_updated_at
+        description: Ultima corrida que toco la fila.
+        data_tests:
+          - not_null
+
+  - name: dim_vendor
+    description: Dimension de acreedores con condicion de pago y actividad. Grano - un LIFNR.
+    columns:
+      - name: lifnr
+        data_tests:
+          - unique:
+              config:
+                severity: error
+          - not_null
+      - name: vendor_name
+        data_tests:
+          - not_null
+      - name: country
+        data_tests:
+          - not_null
+      - name: agreed_payment_days
+        description: Dias de plazo pactado, derivados del codigo de condicion de pago.
+        data_tests:
+          - not_null
+      - name: is_active
+        data_tests:
+          - not_null
+
+  - name: dim_date
+    description: Calendario diario del proyecto. Grano - un dia.
+    columns:
+      - name: date_day
+        data_tests:
+          - unique:
+              config:
+                severity: error
+          - not_null
+      - name: date_key
+        data_tests:
+          - unique
+          - not_null
+      - name: year_month
+        data_tests:
+          - not_null
+      - name: is_weekday
+        data_tests:
+          - not_null
+
+  - name: fct_ap_payment_performance
+    description: >
+      Dias reales de pago contra la condicion pactada. Grano - un acreedor por
+      mes de compensacion. Solo partidas compensadas.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - lifnr
+            - clearing_month
+          config:
+            severity: error
+    columns:
+      - name: lifnr
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_vendor')
+              field: lifnr
+              config:
+                severity: error
+      - name: clearing_month
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_day
+      - name: cleared_items
+        data_tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: cleared_amount_local
+        description: Suma de importes en moneda local. Nunca se agrega el importe en moneda de documento.
+        data_tests:
+          - not_null
+      - name: avg_days_vs_net_due
+        description: Promedio de dias entre el vencimiento neto y la compensacion. Negativo = se pago antes.
+        data_tests:
+          - not_null
+      - name: avg_days_vs_agreed_terms
+        description: Promedio de dias entre BLDAT y la compensacion, menos el plazo pactado.
+        data_tests:
+          - not_null
+      - name: terms_drift_days
+        description: >
+          Desvio entre el plazo que quedo cargado en el documento y el plazo del
+          maestro de acreedores. Mide inconsistencia de datos maestros, no
+          comportamiento de pago.
+      - name: within_terms_pct
+        description: Porcentaje de partidas compensadas en o antes del vencimiento neto.
+        data_tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "between 0 and 100"
+              config:
+                severity: error

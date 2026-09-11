@@ -1,0 +1,43 @@
+# --- secretos: nada de esto entra al repo ---
+.env
+.env.*
+!.env.example
+*.p8
+*.pem
+*.key
+rsa_key*
+secrets/
+
+# --- datos operativos ---
+# El extracto inicial se versiona porque es el punto de partida reproducible
+# del dataset; los change feeds diarios los produce generate_extract.py.
+landing/FBL1N_*.xlsx
+!landing/FBL1N_20260906.xlsx
+staging_files/*
+!staging_files/.gitkeep
+
+# --- dbt ---
+dbt_ap/target/
+dbt_ap/logs/
+dbt_ap/dbt_packages/
+dbt_ap/.user.yml
+
+# --- web ---
+web/node_modules/
+web/.next/
+web/out/
+web/.vercel/
+
+# --- python ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# --- SO / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

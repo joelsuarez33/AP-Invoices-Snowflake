@@ -1,0 +1,50 @@
+# Perfil de conexion. Ningun valor esta hardcodeado y ningun env_var() tiene
+# fallback: si falta una variable, dbt aborta antes de conectarse en lugar de
+# apuntar en silencio a un destino por defecto.
+#
+# Dos targets segun de donde viene la clave privada:
+#   dev -> private_key_path, el .p8 vive en disco (desarrollo local)
+#   ci  -> private_key,      el PEM llega por el secret store de GitHub
+#
+# No hay target con password: el usuario de servicio se crea con TYPE = SERVICE
+# y solo acepta key-pair.
+
+dbt_ap:
+  target: dev
+
+  outputs:
+    dev:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
+      schema: "{{ env_var('SNOWFLAKE_SCHEMA_ANALYTICS') }}"
+      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH') }}"
+      private_key_passphrase: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PASSPHRASE', '') }}"
+      threads: 4
+      client_session_keep_alive: false
+      query_tag: dbt_ap_dev
+      retry_on_database_errors: true
+      retry_all: false
+      connect_retries: 2
+      connect_timeout: 30
+
+    ci:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
+      schema: "{{ env_var('SNOWFLAKE_SCHEMA_ANALYTICS') }}"
+      private_key: "{{ env_var('SNOWFLAKE_PRIVATE_KEY') }}"
+      private_key_passphrase: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PASSPHRASE', '') }}"
+      threads: 8
+      client_session_keep_alive: false
+      query_tag: dbt_ap_ci
+      retry_on_database_errors: true
+      retry_all: false
+      connect_retries: 2
+      connect_timeout: 30

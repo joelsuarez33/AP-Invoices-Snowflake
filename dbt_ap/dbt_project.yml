@@ -1,0 +1,76 @@
+name: 'dbt_ap'
+version: '1.0.0'
+config-version: 2
+
+profile: 'dbt_ap'
+
+model-paths:    ['models']
+seed-paths:     ['seeds']
+snapshot-paths: ['snapshots']
+macro-paths:    ['macros']
+test-paths:     ['tests']
+analysis-paths: ['analyses']
+
+target-path: 'target'
+clean-targets:
+  - 'target'
+  - 'dbt_packages'
+
+require-dbt-version: ['>=1.8.0', '<2.0.0']
+
+# El QUALIFY de staging y el merge de la mart resuelven el change feed a estado
+# actual. Todo lo que dependa de la fecha de corte se calcula contra
+# _extract_date -- nunca contra CURRENT_DATE, para que un re-proceso de ayer
+# devuelva exactamente lo mismo que devolvio ayer.
+vars:
+  # Divisa de referencia del ledger. Toda metrica agregada va en esta moneda.
+  local_currency: 'ARS'
+  # Rango del calendario de dim_date.
+  date_spine_start: '2026-01-01'
+  date_spine_end: '2027-12-31'
+
+models:
+  dbt_ap:
+    +persist_docs:
+      relation: true
+      columns: true
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: view
+      +schema: intermediate
+    marts:
+      +materialized: table
+      +schema: marts
+
+seeds:
+  dbt_ap:
+    +schema: seeds
+    vendors:
+      +column_types:
+        # LIFNR viaja como texto en todo el pipeline: en SAP es un identificador
+        # con ceros a la izquierda, no un numero.
+        lifnr: varchar(10)
+        payment_terms: varchar(4)
+        purchasing_group: varchar(3)
+        country: varchar(2)
+    fx_rates:
+      +column_types:
+        rate_date: date
+        currency: varchar(3)
+        rate_to_ars: number(18,6)
+    document_types:
+      +column_types:
+        blart: varchar(2)
+        debit_credit_indicator: varchar(1)
+        is_invoice: boolean
+
+snapshots:
+  dbt_ap:
+    +target_schema: snapshots
+
+data_tests:
+  dbt_ap:
+    +store_failures: true
+    +schema: test_failures

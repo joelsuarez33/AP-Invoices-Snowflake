@@ -1,0 +1,62 @@
+# Lint del SQL de dbt sin conectarse a Snowflake y sin resolver dependencias:
+# el templater jinja rinde los modelos con los builtins de dbt y con los macros
+# del proyecto cargados desde disco. Es lo que permite que ci.yml corra en un
+# PR de un fork, donde no hay secrets.
+[sqlfluff]
+dialect = snowflake
+templater = jinja
+max_line_length = 100
+large_file_skip_byte_limit = 40000
+exclude_rules = RF01, RF02, RF04, ST06, AM05, LT05, LT09, CV02
+processes = 0
+
+[sqlfluff:indentation]
+indented_joins = false
+indented_ctes = false
+implicit_indents = allow
+template_blocks_indent = false
+
+[sqlfluff:templater:jinja]
+apply_dbt_builtins = true
+load_macros_from_path = dbt_ap/macros
+
+[sqlfluff:templater:jinja:context]
+# Valores de vars usados por los modelos. Espejan dbt_project.yml.
+local_currency = ARS
+date_spine_start = 2026-01-01
+date_spine_end = 2027-12-31
+
+[sqlfluff:rules:capitalisation.keywords]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.identifiers]
+extended_capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.functions]
+extended_capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.literals]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.types]
+extended_capitalisation_policy = lower
+
+[sqlfluff:rules:aliasing.table]
+aliasing = explicit
+
+[sqlfluff:rules:aliasing.column]
+aliasing = explicit
+
+[sqlfluff:rules:ambiguous.column_references]
+group_by_and_order_by_style = consistent
+
+[sqlfluff:rules:convention.count_rows]
+prefer_count_1 = false
+prefer_count_0 = false
+
+# El alias alineado en columna es intencional: en un select de 30 campos, el
+# alias alineado es lo que hace legible el diff cuando se agrega una columna.
+[sqlfluff:layout:type:alias_expression]
+spacing_before = align
+align_within = select_clause
+align_scope = bracketed

@@ -1,0 +1,33 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = [".venv", "web", "dbt_ap/target", "dbt_ap/dbt_packages"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "W",    # warnings
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "C4",   # comprehensions
+    "SIM",  # simplify
+    "PTH",  # usar pathlib
+    "RUF",
+]
+ignore = [
+    # Los mensajes de error del pipeline se arman con f-strings largos y se leen
+    # mejor asi que partidos en concatenaciones.
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# El script de procedencia del dataset se versiona tal como se corrio.
+"scripts/enrich_baseline.py" = ["ALL"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["config"]
+
+[tool.ruff.format]
+quote-style = "double"
