@@ -121,7 +121,9 @@ def build_queries(objects: dict[str, str]) -> dict[str, str]:
               and waers != hwaer
               and fx_revaluation_local is not null
             group by waers
-            order by abs(sum(fx_revaluation_local)) desc
+            -- Por el alias y no por sum(fx_revaluation_local): en ORDER BY
+            -- Snowflake resuelve primero el alias, y eso anidaria dos SUM.
+            order by abs(fx_revaluation_local) desc
         """,
         # --- comportamiento de pago por mes ---
         "payment_performance": f"""
