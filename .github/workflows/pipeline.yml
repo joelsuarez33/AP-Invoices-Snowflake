@@ -39,7 +39,9 @@ jobs:
     timeout-minutes: 45
 
     env:
-      DBT_PROFILES_DIR: dbt_ap
+      # Absoluta: los pasos de dbt corren con working-directory dbt_ap, y una
+      # ruta relativa se resolveria como dbt_ap/dbt_ap.
+      DBT_PROFILES_DIR: ${{ github.workspace }}/dbt_ap
       # Todo llega como secret del repositorio, tambien los nombres de objetos.
       # Que un nombre de schema salga enmascarado en los logs no molesta, y un
       # unico origen evita que la mitad de la configuracion quede vacia.
