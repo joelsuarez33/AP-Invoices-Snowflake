@@ -220,12 +220,16 @@ def run(args: argparse.Namespace) -> int:
             cursor.execute(copy_sql)
             results = cursor.fetchall()
 
-        if not results:
+        # Sin archivos nuevos, COPY no devuelve cero filas: devuelve una sola fila
+        # de una columna, "Copy executed with 0 files processed.". Solo las filas
+        # con el detalle por archivo traen status y conteos.
+        file_results = [row for row in results if len(row) >= 4]
+        if not file_results:
             log.info("Sin archivos nuevos: el load history del stage ya los registro.")
             return 0
 
         loaded = 0
-        for row in results:
+        for row in file_results:
             file_name, status, rows_parsed, rows_loaded = row[0], row[1], row[2], row[3]
             loaded += int(rows_loaded or 0)
             log.info("%s | %s | parsed=%s loaded=%s", file_name, status, rows_parsed, rows_loaded)
