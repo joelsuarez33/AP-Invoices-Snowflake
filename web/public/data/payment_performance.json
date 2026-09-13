@@ -1,0 +1,66 @@
+[
+  {
+    "clearing_year_month": "2026-02",
+    "cleared_items": 5,
+    "cleared_amount_local": -22915919.54,
+    "avg_days_to_pay": 17.8,
+    "avg_days_vs_net_due": -3.8,
+    "within_terms_pct": 100.0
+  },
+  {
+    "clearing_year_month": "2026-03",
+    "cleared_items": 245,
+    "cleared_amount_local": -1244742769.34,
+    "avg_days_to_pay": 30.8,
+    "avg_days_vs_net_due": 2.1,
+    "within_terms_pct": 49.8
+  },
+  {
+    "clearing_year_month": "2026-04",
+    "cleared_items": 317,
+    "cleared_amount_local": -1370036960.9,
+    "avg_days_to_pay": 33.0,
+    "avg_days_vs_net_due": 4.3,
+    "within_terms_pct": 32.5
+  },
+  {
+    "clearing_year_month": "2026-05",
+    "cleared_items": 395,
+    "cleared_amount_local": -1535254821.86,
+    "avg_days_to_pay": 33.6,
+    "avg_days_vs_net_due": 4.6,
+    "within_terms_pct": 31.6
+  },
+  {
+    "clearing_year_month": "2026-06",
+    "cleared_items": 313,
+    "cleared_amount_local": -1568757392.9,
+    "avg_days_to_pay": 34.6,
+    "avg_days_vs_net_due": 5.4,
+    "within_terms_pct": 28.1
+  },
+  {
+    "clearing_year_month": "2026-07",
+    "cleared_items": 781,
+    "cleared_amount_local": -3350564276.72,
+    "avg_days_to_pay": 52.7,
+    "avg_days_vs_net_due": 23.3,
+    "within_terms_pct": 4.7
+  },
+  {
+    "clearing_year_month": "2026-08",
+    "cleared_items": 965,
+    "cleared_amount_local": -4009357554.39,
+    "avg_days_to_pay": 52.0,
+    "avg_days_vs_net_due": 22.6,
+    "within_terms_pct": 1.6
+  },
+  {
+    "clearing_year_month": "2026-09",
+    "cleared_items": 350,
+    "cleared_amount_local": -1432106828.75,
+    "avg_days_to_pay": 51.4,
+    "avg_days_vs_net_due": 22.6,
+    "within_terms_pct": 1.1
+  }
+]
