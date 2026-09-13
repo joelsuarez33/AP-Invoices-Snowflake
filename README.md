@@ -1,120 +1,152 @@
 # Pipeline ELT incremental de cuentas a pagar
 
 Pipeline diario que ingesta el extracto de partidas individuales de acreedores
-(transaccion **FBL1N** de SAP FI-AP), lo modela en Snowflake con dbt y publica un
-tablero estatico.
+de SAP FI-AP (transaccion **FBL1N**), lo modela en Snowflake con dbt y deja
+los agregados listos para un tablero estatico.
 
-El dataset es sintetico, pero el problema no lo es: el extracto es un **change
-feed**, no un snapshot. Cada corrida trae solo lo que cambio ese dia, un mismo
-documento vuelve a aparecer cuando se corrige o se compensa, y hay documentos que
-llegan con semanas de atraso. Todo el diseno del pipeline sale de eso.
+Los datos son sinteticos. El generador esta versionado en el repo como prueba
+de procedencia.
 
 ---
 
-## El problema
+## Que problema resuelve
 
-FBL1N no expone un feed de cambios: expone una pantalla. Lo que se puede exportar
-todos los dias es un archivo con las partidas que se movieron, con estas
-propiedades:
+FBL1N no expone un feed de cambios: es una pantalla. Lo que se exporta todos
+los dias es un archivo con las partidas que se movieron ese dia. Eso lo
+convierte en un **change feed**, no en un snapshot:
 
-| Propiedad | Consecuencia en el diseno |
+| Lo que trae el extracto | Lo que obliga a hacer |
 |---|---|
-| El mismo `BELNR` vuelve a aparecer con datos distintos | La clave del merge es `BELNR`, y RAW guarda todas las versiones |
-| Un documento se re-emite completo al compensarse | El estado se resuelve con `QUALIFY`, no con un snapshot diario |
-| Llegan documentos con `BUDAT` de 15 a 45 dias atras | El filtro incremental no puede ser por fecha contable |
-| `VERZN` lo calcula el report al ejecutarse | El aging se recalcula; el campo de origen no es confiable |
-| Tres monedas de documento, una moneda local | Ninguna metrica agregada usa el importe en moneda de documento |
-| Fila de totales al pie del archivo | Da un checksum gratis, y hay que sacarla antes de cargar |
+| El mismo `BELNR` vuelve con datos distintos cuando se corrige o se compensa | RAW guarda todas las versiones y el estado actual se resuelve con `QUALIFY` |
+| Una compensacion es un UPDATE sobre una partida que ya se cargo | Un delta de solo altas no alcanza |
+| Documentos con `BUDAT` de 15 a 45 dias atras | El filtro incremental no puede ir por fecha contable |
+| `VERZN` lo calcula el report al ejecutarse | El aging se recalcula contra la fecha de corte del ledger |
+| Tres monedas de documento y una moneda local | Toda metrica agregada va en `DMBTR` |
+| Una fila de totales al pie, con `*` en moneda de documento | Checksum contra moneda local, y la fila no llega a RAW |
+
+Cada una de estas decisiones esta desarrollada en
+[docs/DECISIONS.md](docs/DECISIONS.md), con las alternativas que descarte.
 
 ---
 
-## Arquitectura
+## Flujo
 
+```mermaid
+flowchart LR
+    subgraph py["Python"]
+        GEN["generate_extract.py<br/>change feed del dia"]
+        NORM["normalize.py<br/>contrato de columnas + checksum"]
+        LOAD["load.py<br/>PUT + COPY INTO"]
+        EXP["export_mart.py"]
+    end
+
+    subgraph sf["Snowflake"]
+        RAW[("RAW.FBL1N_ITEMS<br/>append-only, todo STRING")]
+        STG["stg_fbl1n__items<br/>casteo + QUALIFY por BELNR"]
+        SEEDS[("seeds<br/>vendors, fx_rates, document_types")]
+        INT["intermediate<br/>enriquecido, aging, revaluacion FX"]
+        SNAP["snap_ap_amounts<br/>SCD2 de importes"]
+        MART["marts<br/>fct_ap_open_items (merge por BELNR)<br/>fct_ap_payment_performance, dims"]
+    end
+
+    GEN -->|"landing/FBL1N_YYYYMMDD.xlsx"| NORM
+    NORM -->|"staging_files/*.csv<br/>sin fila de totales"| LOAD
+    LOAD --> RAW
+    RAW --> STG
+    SEEDS --> INT
+    STG --> INT
+    STG --> SNAP
+    INT --> MART
+    MART --> EXP
+    EXP -->|"web/public/data/*.json"| JSON[("datasets estaticos")]
+
+    STATE[("rama artifacts<br/>_state.json, manifest.json")] -.->|"restaura al inicio"| GEN
+    MART -.->|"publica despues de dbt build"| STATE
 ```
-generate_extract.py  ->  landing/FBL1N_YYYYMMDD.xlsx       change feed diario
-normalize.py         ->  staging_files/FBL1N_YYYYMMDD.csv  desempaqueta + valida checksum
-load.py              ->  PUT + COPY INTO                   ingesta append-only a RAW
-dbt build            ->  STG -> INT -> MART                 casteo, enriquecido, merge
-export_mart.py       ->  web/public/data/*.json            serving estatico
-```
 
-Orquestacion: GitHub Actions con cron diario. Sin Airflow, sin Dagster, sin dlt.
-Para un pipeline de una sola fuente y cinco pasos, un scheduler dedicado agrega
-mas superficie de operacion que valor.
-
-### Las cuatro decisiones que sostienen el resto
-
-**1. RAW es append-only.** Nunca se borra ni se sobrescribe. Cada `COPY INTO`
-agrega las filas del feed con su metadata (`_source_file`, `_file_row_number`,
-`_loaded_at`, `_extract_date`). Un `BELNR` termina con varias filas: la version
-original y cada re-emision. Ese historial es lo que reemplaza a los snapshots
-completos y lo que hace auditable el merge. La idempotencia la da Snowflake:
-`COPY INTO` registra los archivos ya cargados y los ignora durante 64 dias, asi
-que no hay deduplicacion propia en la ingesta.
-
-**2. El casteo vive solo en staging.** Todas las columnas de negocio en RAW son
-`STRING`. Una carga no puede fallar porque un campo vino con formato raro: tiene
-que aterrizar y quedar visible. `stg_fbl1n__items` es el unico lugar que castea, y
-es tambien donde el `QUALIFY` resuelve el change feed a estado actual quedandose
-con la ultima version de cada `BELNR`.
-
-**3. El filtro incremental es por `_extract_date`, no por `BUDAT`.** Filtrar por
-fecha contable seria lo natural y esta mal: los late-arriving documents traen
-`BUDAT` de hasta 45 dias atras y quedarian afuera para siempre. `_extract_date` es
-cuando el pipeline **vio** el dato, no cuando ocurrio el hecho, y por eso es
-monotona. El modelo lo documenta en el propio SQL.
-
-**4. Todo se mide contra la fecha de corte del ledger, nunca contra
-`CURRENT_DATE`.** La fecha de corte es `max(_extract_date)`. Consecuencia:
-re-ejecutar el pipeline sobre datos de ayer devuelve exactamente lo que devolvio
-ayer.
+La orquestacion es GitHub Actions, sin Airflow ni Dagster: el DAG es lineal,
+tiene una sola fuente y cinco pasos.
 
 ---
 
-## Modelo dbt
+## Mapeo del extracto: encabezado en espanol a campo SAP
 
-```
-seeds       vendors, fx_rates, document_types
-staging     stg_fbl1n__items          view. Unico casteo. QUALIFY = estado actual.
-            stg_ap__vendors / __fx_rates / __document_types
-snapshots   snap_ap_amounts           SCD2 sobre WRBTR y DMBTR (correcciones de importe)
-intermediate int_ap_items_enriched    join a los tres maestros + fecha de corte
-            int_ap_aging              buckets recalculados, con dias negativos
-            int_ap_fx_revaluation     exposicion cambiaria de las abiertas en USD/EUR
-marts       fct_ap_open_items         incremental merge, unique_key = BELNR
-            fct_ap_payment_performance dias reales vs. condicion pactada
-            dim_vendor, dim_date
-exposures   ap_dashboard              el tablero de Vercel y los modelos que consume
-```
+El extracto se exporta con la variante de layout de FBL1N en espanol. El orden
+de las 21 columnas es parte del contrato: `normalize.py` lo valida contra
+`config.COLUMNS` antes de leer una sola fila.
 
-**Por que un solo snapshot.** `snap_ap_amounts` captura las correcciones de
-importe como SCD2, que es la unica dimension del ledger cuya vigencia no esta en
-los datos. Las compensaciones no lo necesitan: `AUGDT` ya es la fecha del hecho.
+| # | Encabezado en el xlsx | Campo SAP | Uso en el pipeline |
+|---|---|---|---|
+| 1 | Icono part.abiertas/comp. | `ICON_STATUS` | Vacio en el detalle; en la fila de totales trae el marcador `@5C\QPendientes@` |
+| 2 | Acreedor | `LIFNR` | Clave hacia `vendors` (texto, no numero) |
+| 3 | Clave de referencia | `KIDNO` | Estable entre re-emisiones |
+| 4 | Referencia | `XBLNR` | Referencia del proveedor |
+| 5 | Nº documento | `BELNR` | Clave del merge y del `QUALIFY` |
+| 6 | Clave referencia 1 | `XREF1` | Siempre vacio en esta variante |
+| 7 | Vía de pago | `ZLSCH` | Siempre vacio en esta variante |
+| 8 | Bloqueo de pago | `ZLSPR` | Siempre vacio en esta variante |
+| 9 | Demora tras vencimiento neto | `VERZN` | Calculo del report, no confiable: `verzn_report_unreliable` |
+| 10 | Importe en moneda doc. | `WRBTR` | No se agrega entre monedas |
+| 11 | Moneda del documento | `WAERS` | `ARS`, `USD`, `EUR` |
+| 12 | Importe en moneda local | `DMBTR` | Importe de referencia de toda metrica agregada |
+| 13 | Moneda local | `HWAER` | Siempre `ARS` |
+| 14 | Fecha de documento | `BLDAT` | Fecha de la cotizacion del documento |
+| 15 | Fe.contabilización | `BUDAT` | Llega atrasada en los late-arriving |
+| 16 | Vencimiento neto | `NETDT` | Base del aging |
+| 17 | Fecha compensación | `AUGDT` | Nula = partida abierta |
+| 18 | Doc.compensación | `AUGBL` | Compartido por las partidas de un mismo lote de pago |
+| 19 | Clase de documento | `BLART` | `KR`, `RE`, `KG`, `KZ` |
+| 20 | Nombre del usuario | `USNAM` | Usuario que contabilizo |
+| 21 | Cta.contrapartida | `GKONT` | Cuenta de mayor de contrapartida |
 
-**La metrica que no esta en el origen.** `int_ap_fx_revaluation` compara el
-importe con el que se contabilizo cada factura en moneda extranjera contra lo que
-representa la misma obligacion a la cotizacion de la fecha de corte. En un ledger
-que cierra en pesos, esa diferencia es plata y no aparece en ninguna columna de
-FBL1N.
+Las fechas llegan a RAW como texto `DD.MM.YYYY`, tal como las muestra SAP. El
+unico lugar que castea es `stg_fbl1n__items`.
 
-**Tests.** 142 en total. `unique` y `not_null` en claves, `relationships` a las
-dimensiones, `accepted_values` en `BLART`, `WAERS` y `HWAER`, freshness sobre RAW,
-y cuatro tests singulares con `severity` y `store_failures` explicitos:
+---
 
-| Test | Que protege |
+## Numeros verificados
+
+### Dataset base
+
+`scripts/enrich_baseline.py` genera el extracto inicial con semilla fija:
+
+- 5.000 partidas, ledger al 2026-07-08.
+- 40 acreedores con distribucion Pareto: los 5 primeros concentran cerca del
+  57% del volumen.
+- Clases de documento: `KR` 3.768, `RE` 728, `KZ` 285, `KG` 219. `KR` y `RE`
+  van con signo negativo (haber); `KG` y `KZ`, positivo (debe).
+- Moneda de documento: ARS 70%, USD 20%, EUR 10%. `WRBTR = DMBTR / cotizacion`
+  a `BLDAT`.
+- Total: -21.945.446.773,62 ARS.
+- Aging de abiertas: 959 no vencidas, 656 de 1 a 30 dias, 667 de 31 a 60, 661
+  de 61 a 90 y 688 de mas de 90.
+
+### Cierre del backfill (61 dias, 2026-07-08 a 2026-09-06)
+
+- 6.827 documentos distintos en RAW.
+- 1.837 documentos con mas de una version. `unique_stg_fbl1n__items_belnr` pasa:
+  el `QUALIFY` las resuelve.
+- `dbt build`: PASS=157, ERROR=0 (11 modelos, 1 snapshot, 3 seeds, 142 tests).
+- `snap_ap_amounts`: 6.827 filas, sin historia SCD2. Un backfill en un solo
+  build no siembra historia ([ADR-011](docs/DECISIONS.md)).
+
+### Primeras corridas del workflow (ledger al 2026-09-12, consultado el 2026-09-13)
+
+| | |
 |---|---|
-| `assert_posting_date_after_document_date` | `BUDAT >= BLDAT` en toda fila |
-| `assert_no_verzn_on_cleared_items` | `VERZN` poblado si y solo si la partida esta abierta |
-| `assert_mart_reconciles_with_raw` | La mart cuadra contra RAW deduplicado, con tolerancia de un centavo |
-| `assert_clearing_date_not_after_extract` | Ningun `AUGDT` posterior a su `_extract_date` |
-
-El tercero es el que detecta el modo de falla mas caro del diseno: un acreedor
-nuevo que el maestro todavia no tiene hace que el `inner join` de la capa
-intermedia descarte filas en silencio, y el total deja de cuadrar.
+| Extractos cargados | 67 |
+| Filas en RAW | 9.023 |
+| Documentos | 7.002 (3.631 abiertos) |
+| Documentos con mas de una version | 2.012 |
+| Filas por feed diario (07/09 a 12/09) | 61, 66, 50, 78, 51, 46 |
+| `dbt build` en Actions | PASS=157, ERROR=0 |
+| `snap_ap_amounts` | 7.004 filas, 2 versiones cerradas |
+| Revaluacion cambiaria de abiertas en USD y EUR | -182.838.690,63 ARS |
+| Reintento de una corrida ya cargada | 0 archivos procesados, 0 filas duplicadas |
 
 ---
 
-## Puesta en marcha
+## Como correrlo
 
 ### 1. Snowflake
 
@@ -128,134 +160,149 @@ openssl rsa -in rsa_key.p8 -pubout -out rsa_key.pub
 
 Ejecutar `sql/00_setup_account.sql` con `ACCOUNTADMIN`, reemplazando
 `<<RSA_PUBLIC_KEY>>` por el contenido de `rsa_key.pub` sin las lineas
-`BEGIN`/`END`. Despues `sql/01_setup_raw.sql` con el rol `AP_PIPELINE`.
+`BEGIN`/`END`. Despues, `sql/01_setup_raw.sql` con el rol `AP_PIPELINE`. Crean
+el usuario de servicio `AP_PIPELINE_SVC` (`TYPE = SERVICE`, sin password), el
+warehouse `AP_WH` (XS, `AUTO_SUSPEND = 60`, resource monitor de 10 creditos por
+mes), la base `AP_ANALYTICS`, el stage, el file format y la tabla RAW.
 
-### 2. Entorno local
+### 2. Entorno local (Windows, PowerShell)
 
-```bash
+```powershell
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 copy .env.example .env
 ```
 
-Completar `.env`. No hay variable de password: la autenticacion es por key-pair.
+Completar `.env` segun `.env.example`. La clave va por
+`SNOWFLAKE_PRIVATE_KEY_PATH`. `LANDING_DIR`, `STAGING_DIR` y `WEB_DATA_DIR` van
+vacias para usar las rutas del repo.
 
-### 3. Primera corrida
+### 3. Correr el pipeline
 
-```bash
-python normalize.py                          # valida y desempaqueta el extracto inicial
-python load.py                               # PUT + COPY INTO a RAW
-cd dbt_ap && dbt deps && dbt build && cd ..  # seeds, modelos, snapshot y tests
-python export_mart.py                        # datasets del tablero
-cd web && npm install && npm run dev         # tablero en localhost:3000
-```
+Los scripts de Python cargan `.env` solos. dbt no: antes de cualquier comando
+dbt hay que exportar las variables a la sesion.
 
-### 4. Generar mas dias
+```powershell
+python generate_extract.py        # feed del dia siguiente a last_run_date
+python normalize.py               # valida contrato y checksum, escribe los CSV
+python load.py                    # PUT + COPY INTO a RAW
 
-El extracto inicial deja el ledger al **2026-09-06**. El generador nunca emite un
-archivo con fecha posterior a la fecha del sistema, asi que el primer feed
-disponible es el dia siguiente.
+. .\scripts\load_env.ps1          # punto y espacio: deja las variables en la sesion
+cd dbt_ap
+dbt deps
+dbt build                         # seeds, snapshot, modelos y tests
+cd ..
 
-```bash
-python generate_extract.py                   # el dia siguiente a last_run_date
-python generate_extract.py --date 2026-09-07  # una fecha puntual
-python generate_extract.py --days 60          # 60 dias consecutivos
-python generate_extract.py --until 2026-11-05 # hasta esa fecha inclusive
+python export_mart.py             # datasets JSON en web/public/data
 ```
 
 `normalize.py` y `load.py` sin argumentos procesan todo lo pendiente en orden
-cronologico: un backfill de 60 dias entra en una invocacion de cada uno.
+cronologico. `load.py --dry-run` y `export_mart.py --dry-run` imprimen el SQL
+sin conectarse.
 
-El generador es **idempotente por fecha**: `landing/` es la fuente de verdad y el
-universo de documentos se reconstruye replicando los extractos anteriores, con el
-RNG sembrado por `(semilla, fecha)`. La misma fecha produce el mismo archivo.
+### 4. Generar mas dias
 
----
+El generador continua el ledger desde `landing/_state.json` y se niega a emitir
+un extracto con fecha futura. Es idempotente por fecha: el RNG se siembra con
+`(semilla, fecha)`, asi que la misma fecha produce el mismo archivo.
 
-## Variables de entorno
+El `_state.json` versionado en `main` es el estado inicial (2026-09-06). El
+vigente lo publica cada corrida del workflow en la rama `artifacts`. Para
+generar en local sin divergir del ledger que ya esta en Snowflake, primero hay
+que traer ese estado (y no commitearlo en `main`):
 
-Todas se leen de `.env` (local) o del entorno del runner (CI). Ninguna tiene
-valor por defecto en el codigo: si falta una, el proceso aborta antes de
-conectarse.
+```powershell
+git fetch origin artifacts
+git show origin/artifacts:state/_state.json > landing/_state.json
+```
 
-| Variable | Que es |
-|---|---|
-| `SNOWFLAKE_ACCOUNT` | Identificador de cuenta |
-| `SNOWFLAKE_USER` | Usuario de servicio (`AP_PIPELINE_SVC`) |
-| `SNOWFLAKE_ROLE` | `AP_PIPELINE` |
-| `SNOWFLAKE_WAREHOUSE` | `AP_WH` |
-| `SNOWFLAKE_DATABASE` | `AP_ANALYTICS` |
-| `SNOWFLAKE_SCHEMA_RAW` | `RAW` |
-| `SNOWFLAKE_SCHEMA_ANALYTICS` | `ANALYTICS` |
-| `SNOWFLAKE_STAGE` | `STG_FBL1N` |
-| `SNOWFLAKE_FILE_FORMAT` | `FF_FBL1N_CSV` |
-| `SNOWFLAKE_RAW_TABLE` | `FBL1N_ITEMS` |
-| `SNOWFLAKE_PRIVATE_KEY_PATH` | Ruta al `.p8` (modo local) |
-| `SNOWFLAKE_PRIVATE_KEY` | PEM completo en una variable (modo CI) |
-| `SNOWFLAKE_PRIVATE_KEY_PASSPHRASE` | Vacio si la clave se genero sin cifrar |
+```powershell
+python generate_extract.py --days 5             # 5 dias desde last_run_date
+python generate_extract.py --until 2026-09-20   # hasta esa fecha inclusive
+```
 
-`SNOWFLAKE_PRIVATE_KEY_PATH` y `SNOWFLAKE_PRIVATE_KEY` son excluyentes: definir
-las dos es un error explicito.
+`--date` genera una fecha puntual y solo es seguro para el dia siguiente a
+`last_run_date`: si hay un hueco, el feed se arma sin los documentos de los dias
+que faltan.
 
----
+### 5. Un modelo o un test puntual
 
-## Seguridad
-
-- Cero credenciales en el codigo, en comentarios, como default de
-  `os.environ.get()` o en este README.
-- `.env` en `.gitignore`; `.env.example` solo con placeholders vacios.
-- `profiles.yml`: todos los campos por `env_var()` sin fallback.
-- Autenticacion por key-pair RSA. El usuario de servicio se crea con
-  `TYPE = SERVICE` y no acepta password.
-- En Actions los secrets se mapean a `env:` del step y nunca se imprimen: el
-  unico paso que los mira solo publica si estan o no estan.
-- `.gitignore` cubre `.env`, `*.p8`, `*.pem`, los extractos generados,
-  `staging_files/`, `dbt_ap/target/`, `dbt_ap/logs/`, `dbt_ap/dbt_packages/`,
-  `web/node_modules/` y `web/.next/`.
+```powershell
+cd dbt_ap
+dbt build --select fct_ap_open_items
+dbt test --select assert_mart_reconciles_with_raw
+```
 
 ---
 
 ## CI/CD
 
-**`ci.yml`** (pull request): `ruff`, `sqlfluff`, `dbt deps` y `dbt parse`, todo
-sin tocar Snowflake. `sqlfluff` usa el templater jinja y carga los macros del
-proyecto desde disco, asi que no necesita conexion ni resolver paquetes. El paso
-de `dbt compile` queda condicionado a que haya credenciales, porque compile si
-abre conexion: para resolver `is_incremental()` tiene que preguntarle al
-warehouse si la relacion existe.
+**`pipeline.yml`** corre con cron `0 9 * * 1-5` (06:00 en Buenos Aires), con
+push a `main` y a mano con `workflow_dispatch`:
 
-**`pipeline.yml`** (push a `main` y cron `0 9 * * 1-5`): restaura el estado desde
-la rama `artifacts`, genera, normaliza, carga, corre `dbt build`, exporta los
-datasets y publica `_state.json`, `run_results.json` y `manifest.json` de vuelta
-en `artifacts`. Ese commit persiste el estado para la corrida siguiente, habilita
-Slim CI con `--select state:modified+`, y mantiene vivo el cron -- GitHub
-deshabilita los schedules despues de 60 dias sin actividad en el repo.
+1. Restaura `_state.json` desde la rama `artifacts`.
+2. Genera desde `last_run_date + 1` hasta ayer en hora argentina. El lunes
+   genera viernes, sabado y domingo, y una segunda corrida el mismo dia no
+   genera nada.
+3. Normaliza, carga y corre `dbt build --target ci`.
+4. Publica `_state.json`, `manifest.json` y `run_results.json` en `artifacts`.
+   Si no hay commit o el push falla, el job termina en rojo. Ese commit mantiene
+   activo el repo: GitHub deshabilita los cron tras 60 dias sin actividad.
+5. Exporta los datasets y los commitea en `main` con `[skip ci]`.
 
-Una sola conexion a Snowflake por corrida: cada resume del warehouse factura un
-minimo de 60 segundos.
+La configuracion llega por secrets del repositorio: `SNOWFLAKE_ACCOUNT`,
+`SNOWFLAKE_USER`, `SNOWFLAKE_ROLE`, `SNOWFLAKE_WAREHOUSE`,
+`SNOWFLAKE_DATABASE`, `SNOWFLAKE_SCHEMA_RAW`, `SNOWFLAKE_SCHEMA_ANALYTICS`,
+`SNOWFLAKE_STAGE`, `SNOWFLAKE_FILE_FORMAT`, `SNOWFLAKE_RAW_TABLE` y
+`SNOWFLAKE_PRIVATE_KEY` (el PEM completo). En el runner no se define
+`SNOWFLAKE_PRIVATE_KEY_PATH`.
+
+**`ci.yml`** corre en cada pull request, sin conexion a Snowflake: `ruff`,
+`sqlfluff` con templater jinja, `dbt deps` y `dbt parse`.
+
+---
+
+## Tests
+
+142 tests de dbt: `unique` y `not_null` en claves, `relationships` a las
+dimensiones y a los maestros, `accepted_values` en `BLART`, `WAERS` y `HWAER`,
+y cuatro tests singulares. La freshness de RAW esta declarada en la source; se
+chequea con `dbt source freshness`, que `dbt build` no ejecuta.
+
+| Test | Que protege |
+|---|---|
+| `assert_posting_date_after_document_date` | `BUDAT >= BLDAT` en toda fila |
+| `assert_no_verzn_on_cleared_items` | `VERZN` poblado si y solo si la partida esta abierta |
+| `assert_mart_reconciles_with_raw` | La mart cuadra contra RAW deduplicado, con tolerancia de un centavo |
+| `assert_clearing_date_not_after_extract` | Ningun `AUGDT` posterior a su `_extract_date` |
+
+---
+
+## Seguridad
+
+- Ninguna credencial en el codigo, en comentarios ni como default de
+  `os.environ.get()`. Si falta una variable, el proceso aborta antes de conectarse.
+- Autenticacion por key-pair RSA. El usuario de servicio no acepta password.
+- `profiles.yml` resuelve todo por `env_var()` sin fallback.
+- `.env`, `*.p8` y `*.pem` estan en `.gitignore`. `scripts/load_env.ps1` y
+  `scripts/diagnose_auth.py` nunca imprimen valores.
 
 ---
 
 ## Estructura
 
 ```
-.
-|-- config.py                 contrato del layout, rutas y lectura de entorno
-|-- generate_extract.py       change feed diario (--date / --days / --until)
-|-- normalize.py              xlsx -> csv, valida contrato y checksum
-|-- load.py                   PUT + COPY INTO append-only
-|-- export_mart.py            marts -> JSON estatico
-|-- landing/                  extractos xlsx + _state.json
-|-- staging_files/            csv normalizados
-|-- scripts/enrich_baseline.py  procedencia del dataset inicial (fuera del pipeline)
-|-- sql/                      setup de cuenta, RAW, copy de referencia y teardown
-|-- dbt_ap/                   proyecto dbt
-|-- web/                      tablero Next.js (app router, export estatico)
-|-- .github/workflows/        ci.yml y pipeline.yml
-`-- docs/DECISIONS.md         indice de ADRs
+config.py               contrato del layout, rutas y lectura de entorno
+generate_extract.py     change feed diario
+normalize.py            xlsx -> csv, contrato y checksum
+load.py                 PUT + COPY INTO append-only
+export_mart.py          marts -> JSON estatico
+landing/                extracto versionado del 2026-09-06 y _state.json
+scripts/                load_env.ps1, diagnose_auth.py, enrich_baseline.py
+sql/                    setup de cuenta y RAW, COPY de referencia, teardown
+dbt_ap/                 proyecto dbt
+docs/DECISIONS.md       decisiones de diseno (ADRs)
+web/                    tablero Next.js que lee los JSON (sin desplegar)
+.github/workflows/      pipeline.yml y ci.yml
 ```
-
-`scripts/enrich_baseline.py` no forma parte del pipeline: documenta como se
-construyo el extracto inicial de 5.000 partidas y se versiona para que el dataset
-tenga procedencia.
