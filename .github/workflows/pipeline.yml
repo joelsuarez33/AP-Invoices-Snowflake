@@ -3,8 +3,14 @@ name: Pipeline diario
 on:
   push:
     branches: [main]
+    # Un commit de documentacion no justifica despertar el warehouse.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   schedule:
-    # 09:00 UTC, lunes a viernes. El ledger no se mueve el fin de semana.
+    # 09:00 UTC = 06:00 en Buenos Aires (UTC-3 todo el ano, sin horario de
+    # verano), lunes a viernes. A esa hora el dia anterior ya cerro en Argentina
+    # y la fecha UTC del runner coincide con la local.
     - cron: '0 9 * * 1-5'
   workflow_dispatch:
     inputs:
@@ -34,18 +40,21 @@ jobs:
 
     env:
       DBT_PROFILES_DIR: dbt_ap
-      # Nombres de objetos: no son secretos, viven como repository variables.
-      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
-      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
-      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
-      SNOWFLAKE_SCHEMA_RAW: ${{ vars.SNOWFLAKE_SCHEMA_RAW }}
-      SNOWFLAKE_SCHEMA_ANALYTICS: ${{ vars.SNOWFLAKE_SCHEMA_ANALYTICS }}
-      SNOWFLAKE_STAGE: ${{ vars.SNOWFLAKE_STAGE }}
-      SNOWFLAKE_FILE_FORMAT: ${{ vars.SNOWFLAKE_FILE_FORMAT }}
-      SNOWFLAKE_RAW_TABLE: ${{ vars.SNOWFLAKE_RAW_TABLE }}
-      # Credenciales: solo estas cuatro son secretos reales.
+      # Todo llega como secret del repositorio, tambien los nombres de objetos.
+      # Que un nombre de schema salga enmascarado en los logs no molesta, y un
+      # unico origen evita que la mitad de la configuracion quede vacia.
+      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_SCHEMA_RAW: ${{ secrets.SNOWFLAKE_SCHEMA_RAW }}
+      SNOWFLAKE_SCHEMA_ANALYTICS: ${{ secrets.SNOWFLAKE_SCHEMA_ANALYTICS }}
+      SNOWFLAKE_STAGE: ${{ secrets.SNOWFLAKE_STAGE }}
+      SNOWFLAKE_FILE_FORMAT: ${{ secrets.SNOWFLAKE_FILE_FORMAT }}
+      SNOWFLAKE_RAW_TABLE: ${{ secrets.SNOWFLAKE_RAW_TABLE }}
       SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
       SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      # Modo CI de load.py y del target ci de dbt: el PEM completo en una
+      # variable. SNOWFLAKE_PRIVATE_KEY_PATH no se define en el runner.
       SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
       SNOWFLAKE_PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
 
@@ -58,7 +67,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
           cache: pip
           cache-dependency-path: requirements.txt
 
@@ -81,18 +90,30 @@ jobs:
           python -c "import json,pathlib; s=json.loads(pathlib.Path('landing/_state.json').read_text()); print('last_run_date:', s['last_run_date'], '| abiertas:', s['open_items'])"
 
       - name: Generar el change feed
+        # Sin inputs, lleva el ledger desde last_run_date + 1 hasta AYER en hora
+        # de Buenos Aires. El avance lo marca _state.json y no el calendario del
+        # cron: el lunes cubre sabado y domingo, una segunda corrida el mismo dia
+        # no genera nada, y ningun dia se saltea ni se repite. "Ayer en AR" nunca
+        # es posterior a la fecha UTC del runner, asi que el generador no rechaza
+        # el tope por fecha futura.
+        env:
+          INPUT_UNTIL: ${{ inputs.until }}
+          INPUT_DAYS: ${{ inputs.days }}
         run: |
           set -euo pipefail
-          ARGS=""
-          if [ -n "${{ inputs.until }}" ]; then
-            ARGS="--until ${{ inputs.until }}"
-          elif [ -n "${{ inputs.days }}" ]; then
-            ARGS="--days ${{ inputs.days }}"
+          if [ -n "$INPUT_UNTIL" ]; then
+            python generate_extract.py --until "$INPUT_UNTIL"
+          elif [ -n "$INPUT_DAYS" ]; then
+            python generate_extract.py --days "$INPUT_DAYS"
+          else
+            LAST_RUN=$(python -c "import json,pathlib; print(json.loads(pathlib.Path('landing/_state.json').read_text())['last_run_date'])")
+            TARGET=$(TZ=America/Argentina/Buenos_Aires date -d yesterday +%F)
+            if [[ "$LAST_RUN" < "$TARGET" ]]; then
+              python generate_extract.py --until "$TARGET"
+            else
+              echo "El ledger ya esta al $LAST_RUN (tope $TARGET): no hay dias que generar."
+            fi
           fi
-          # Sin argumentos genera el dia siguiente a last_run_date. Si el ledger
-          # ya llego a la fecha del sistema, el generador sale con error: es
-          # deliberado, un extracto no puede tener fecha futura.
-          python generate_extract.py $ARGS
 
       - name: Normalizar y validar checksums
         # Sin argumentos procesa todos los extractos que todavia no tienen CSV,
@@ -115,16 +136,18 @@ jobs:
         working-directory: dbt_ap
         run: dbt build --target ci
 
-      - name: Exportar los datasets del tablero
-        run: python export_mart.py
-
-      - name: Publicar estado y artefactos
+      - name: Publicar estado y artefactos en la rama artifacts
+        # Va inmediatamente despues de dbt build: RAW ya recibio los archivos de
+        # esta corrida, y el estado tiene que quedar persistido aunque el export
+        # falle despues.
+        #
         # Este commit cumple tres funciones:
         #   1. Persiste _state.json para la corrida siguiente.
         #   2. Deja manifest.json para el Slim CI (--select state:modified+).
         #   3. Mantiene el repo activo: GitHub deshabilita los cron despues de
         #      60 dias sin actividad, y un pipeline que se apaga solo es peor
-        #      que uno que nunca existio.
+        #      que uno que nunca existio. Por eso no hay salida silenciosa: si
+        #      no hay commit o el push no sale, el job termina en rojo.
         run: |
           set -euo pipefail
           git config user.name  'github-actions[bot]'
@@ -148,12 +171,22 @@ jobs:
           cd "$WORKTREE"
           git add -A
           if git diff --cached --quiet; then
-            echo "Sin cambios que publicar."
-          else
-            LAST_RUN=$(python -c "import json,pathlib; print(json.loads(pathlib.Path('state/_state.json').read_text())['last_run_date'])")
-            git commit -m "pipeline: ledger al $LAST_RUN (run ${{ github.run_number }})"
-            git push origin artifacts
+            # run_results.json cambia en cada invocacion de dbt (invocation_id,
+            # tiempos). Un arbol identico significa que no se esta publicando lo
+            # que corrio.
+            echo "::error::Nada que commitear en artifacts: el estado de esta corrida no se publico."
+            exit 1
           fi
+
+          LAST_RUN=$(python -c "import json,pathlib; print(json.loads(pathlib.Path('state/_state.json').read_text())['last_run_date'])")
+          git commit -m "pipeline: ledger al $LAST_RUN (run ${{ github.run_number }})"
+          if ! git push origin artifacts; then
+            echo "::error::Fallo el push a artifacts. _state.json no quedo persistido y el repo no registra actividad."
+            exit 1
+          fi
+
+      - name: Exportar los datasets del tablero
+        run: python export_mart.py
 
       - name: Publicar los datasets del tablero
         run: |
