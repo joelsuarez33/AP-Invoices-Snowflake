@@ -94,7 +94,7 @@ jobs:
       - name: Generar el change feed
         # Sin inputs, lleva el ledger desde last_run_date + 1 hasta AYER en hora
         # de Buenos Aires. El avance lo marca _state.json y no el calendario del
-        # cron: el lunes cubre sabado y domingo, una segunda corrida el mismo dia
+        # cron: el lunes genera viernes, sabado y domingo, una segunda corrida el mismo dia
         # no genera nada, y ningun dia se saltea ni se repite. "Ayer en AR" nunca
         # es posterior a la fecha UTC del runner, asi que el generador no rechaza
         # el tope por fecha futura.
