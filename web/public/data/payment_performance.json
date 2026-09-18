@@ -57,10 +57,10 @@
   },
   {
     "clearing_year_month": "2026-09",
-    "cleared_items": 463,
-    "cleared_amount_local": -1847614263.03,
-    "avg_days_to_pay": 51.4,
+    "cleared_items": 493,
+    "cleared_amount_local": -1950886041.37,
+    "avg_days_to_pay": 51.5,
     "avg_days_vs_net_due": 22.3,
-    "within_terms_pct": 1.1
+    "within_terms_pct": 1.0
   }
 ]
