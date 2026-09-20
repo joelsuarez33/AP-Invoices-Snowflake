@@ -331,7 +331,8 @@ export_mart.py          marts -> JSON estatico
 landing/                extracto versionado del 2026-09-06 y _state.json
 scripts/                load_env.ps1, diagnose_auth.py, cleanup_test_failures.py,
                         enrich_baseline.py
-sql/                    setup de cuenta y RAW, COPY de referencia, teardown
+sql/                    setup de cuenta y RAW, COPY de referencia,
+                        verificacion manual, teardown
 dbt_ap/                 proyecto dbt
 docs/DECISIONS.md       decisiones de diseno (ADRs)
 web/                    tablero Next.js que lee los JSON, publicado en Pages
