@@ -4,15 +4,15 @@ exposures:
   - name: ap_dashboard
     label: Tablero de cuentas a pagar
     type: dashboard
-    maturity: high
-    url: https://ap-analytics.vercel.app
+    maturity: low
+    url: https://joelsuarez33.github.io/AP-Invoices-Snowflake/
     description: >
-      Tablero publico del ledger de acreedores, desplegado en Vercel. No
+      Tablero publico del ledger de acreedores, publicado en GitHub Pages. No
       consulta Snowflake: export_mart.py materializa los agregados a JSON
       estatico en web/public/data/ como ultimo paso del pipeline, y el sitio
-      lee esos archivos. Es lo que mantiene el warehouse suspendido entre
-      corridas -- el tablero no despierta el warehouse cada vez que alguien lo
-      abre.
+      lee esos archivos en tiempo de build. Es lo que mantiene el warehouse
+      suspendido entre corridas -- el tablero no despierta el warehouse cada
+      vez que alguien lo abre.
 
       Declarar la exposure hace que `dbt ls --select +exposure:ap_dashboard`
       devuelva todo lo que el tablero necesita, y que un cambio en cualquiera

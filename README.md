@@ -7,6 +7,13 @@ los agregados listos para un tablero estatico.
 Los datos son sinteticos. El generador esta versionado en el repo como prueba
 de procedencia.
 
+**Tablero:** <https://joelsuarez33.github.io/AP-Invoices-Snowflake/>
+**Documentacion de dbt, con el grafo de linaje navegable:**
+<https://joelsuarez33.github.io/AP-Invoices-Snowflake/dbt/>
+
+Las dos se republican despues de cada corrida del pipeline, desde la rama
+`gh-pages`.
+
 ---
 
 ## Que problema resuelve

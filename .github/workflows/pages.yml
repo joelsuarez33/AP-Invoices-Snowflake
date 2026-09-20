@@ -1,0 +1,120 @@
+name: GitHub Pages
+
+# Publica en la rama gh-pages, en una sola corrida:
+#   /      tablero estatico (web/, export de Next.js)
+#   /dbt/  documentacion de dbt con el grafo de linaje
+#
+# Corre despues de cada pipeline en verde. El tablero se reconstruye con los
+# JSON que el pipeline acaba de commitear en main, y el catalogo de dbt se arma
+# consultando el information schema de Snowflake, asi que describe las tablas
+# que ese mismo pipeline construyo.
+
+on:
+  workflow_run:
+    workflows: ["Pipeline diario"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: tablero + dbt docs -> gh-pages
+    # Con workflow_run, solo si el pipeline termino en verde: un catalogo de un
+    # build fallido documentaria tablas a medio construir.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      # Absoluta: los pasos de dbt corren con working-directory dbt_ap.
+      DBT_PROFILES_DIR: ${{ github.workspace }}/dbt_ap
+      # Solo lo que leen profiles.yml (target ci) y la source de RAW.
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_SCHEMA_RAW: ${{ secrets.SNOWFLAKE_SCHEMA_RAW }}
+      SNOWFLAKE_SCHEMA_ANALYTICS: ${{ secrets.SNOWFLAKE_SCHEMA_ANALYTICS }}
+      SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+      SNOWFLAKE_PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # workflow_run no trae el commit del pipeline: hay que tomar main,
+          # que ya incluye los datasets que esa corrida publico.
+          ref: main
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Instalar dependencias de Python
+        run: pip install --disable-pip-version-check -r requirements.txt
+
+      - name: dbt deps
+        working-directory: dbt_ap
+        run: dbt deps
+
+      - name: dbt docs generate
+        # --static deja ademas target/static_index.html, con manifest y catalogo
+        # embebidos: un unico archivo que Pages sirve sin fetch a otros JSON.
+        working-directory: dbt_ap
+        run: dbt docs generate --target ci --static
+
+      - name: Build del tablero
+        working-directory: web
+        env:
+          # En Pages el sitio cuelga de /<repo>/, no de la raiz del dominio.
+          NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Armar el sitio
+        run: |
+          set -euo pipefail
+          SITE="$RUNNER_TEMP/site"
+          rm -rf "$SITE"
+          cp -r web/out "$SITE"
+          mkdir -p "$SITE/dbt"
+          cp dbt_ap/target/static_index.html "$SITE/dbt/index.html"
+          # Sin Jekyll: Pages sirve los archivos tal cual, incluido _next/.
+          touch "$SITE/.nojekyll"
+          echo "Contenido del sitio:"
+          ls -la "$SITE"
+
+      - name: Publicar en gh-pages
+        # La rama se reescribe en cada corrida con un unico commit: guarda el
+        # sitio vigente y no acumula varios MB de historia por dia.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/site"
+          git init -q -b gh-pages
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -q -m "sitio al $(date -u +%Y-%m-%d) (run ${{ github.run_number }})"
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if ! git push --force origin gh-pages; then
+            echo "::error::Fallo el push a gh-pages. El sitio publicado no se actualizo."
+            exit 1
+          fi
