@@ -268,6 +268,11 @@ La configuracion llega por secrets del repositorio: `SNOWFLAKE_ACCOUNT`,
 **`ci.yml`** corre en cada pull request, sin conexion a Snowflake: `ruff`,
 `sqlfluff` con templater jinja, `dbt deps` y `dbt parse`.
 
+**`pages.yml`** corre despues de cada pipeline en verde y publica la rama
+`gh-pages`: el tablero en la raiz, con los JSON que acaba de dejar el pipeline,
+y `dbt docs generate --static` en `/dbt/`. La rama se reescribe con un unico
+commit por corrida.
+
 ---
 
 ## Tests
@@ -310,6 +315,6 @@ scripts/                load_env.ps1, diagnose_auth.py, enrich_baseline.py
 sql/                    setup de cuenta y RAW, COPY de referencia, teardown
 dbt_ap/                 proyecto dbt
 docs/DECISIONS.md       decisiones de diseno (ADRs)
-web/                    tablero Next.js que lee los JSON (sin desplegar)
-.github/workflows/      pipeline.yml y ci.yml
+web/                    tablero Next.js que lee los JSON, publicado en Pages
+.github/workflows/      pipeline.yml, ci.yml y pages.yml
 ```
