@@ -31,6 +31,7 @@ models:
               to: ref('stg_ap__vendors')
               field: lifnr
               config:
+                store_failures: true
                 severity: error
       - name: xblnr
         description: Referencia del proveedor (numero de factura del emisor).
@@ -45,6 +46,8 @@ models:
           - relationships:
               to: ref('stg_ap__document_types')
               field: blart
+              config:
+                store_failures: true
       - name: wrbtr
         description: >
           Importe en moneda de documento. NO agregable entre monedas: cualquier
@@ -60,6 +63,8 @@ models:
           - relationships:
               to: ref('stg_ap__fx_rates')
               field: currency
+              config:
+                store_failures: true
       - name: dmbtr
         description: Importe en moneda local. Importe de referencia del ledger.
         data_tests:

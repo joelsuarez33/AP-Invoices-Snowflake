@@ -289,6 +289,24 @@ chequea con `dbt source freshness`, que `dbt build` no ejecuta.
 | `assert_mart_reconciles_with_raw` | La mart cuadra contra RAW deduplicado, con tolerancia de un centavo |
 | `assert_clearing_date_not_after_extract` | Ningun `AUGDT` posterior a su `_extract_date` |
 
+`store_failures` esta activo en 14 de los 142: los 4 singulares y los 10
+`relationships`. Son los unicos cuyo detalle de fallas dice algo que no se
+reproduce con una consulta de una linea: que `LIFNR` no esta en el maestro, o
+que documento rompe la invariante. Las tablas quedan en el esquema
+`TEST_FAILURES`, una por test.
+
+Para vaciarlo, por ejemplo despues de cambiar ese alcance:
+
+```powershell
+python scripts/cleanup_test_failures.py           # inventario, no borra
+python scripts/cleanup_test_failures.py --drop    # DROP SCHEMA ... CASCADE
+```
+
+Un detalle de dbt que conviene no olvidar: en los data tests, la config de
+`dbt_project.yml` tiene precedencia sobre la del test, al reves que en los
+modelos. Declarar ahi `+store_failures: false` apaga tambien los que lo activan
+explicitamente.
+
 ---
 
 ## Seguridad
@@ -311,7 +329,8 @@ normalize.py            xlsx -> csv, contrato y checksum
 load.py                 PUT + COPY INTO append-only
 export_mart.py          marts -> JSON estatico
 landing/                extracto versionado del 2026-09-06 y _state.json
-scripts/                load_env.ps1, diagnose_auth.py, enrich_baseline.py
+scripts/                load_env.ps1, diagnose_auth.py, cleanup_test_failures.py,
+                        enrich_baseline.py
 sql/                    setup de cuenta y RAW, COPY de referencia, teardown
 dbt_ap/                 proyecto dbt
 docs/DECISIONS.md       decisiones de diseno (ADRs)

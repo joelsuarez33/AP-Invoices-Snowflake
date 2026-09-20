@@ -72,5 +72,18 @@ snapshots:
 
 data_tests:
   dbt_ap:
-    +store_failures: true
+    # store_failures NO se declara aca a proposito. El default de dbt ya es
+    # false, y con 142 tests activarlo en todos dejaba 142 tablas por corrida
+    # en TEST_FAILURES: las que importan quedaban perdidas entre el resto.
+    #
+    # Lo activan uno por uno los que vale la pena inspeccionar:
+    #   - los 10 relationships, que listan las claves sin maestro;
+    #   - los 4 tests singulares de dbt_ap/tests/.
+    #
+    # Un unique o un not_null que falla se reproduce con un group by; un
+    # relationships que falla se responde con la lista de LIFNR faltantes.
+    #
+    # Ojo con ponerlo aca: para los data tests, la config de dbt_project.yml
+    # tiene precedencia sobre la del propio test, al reves que en los modelos.
+    # Un "+store_failures: false" en este bloque apaga tambien los 14 de arriba.
     +schema: test_failures

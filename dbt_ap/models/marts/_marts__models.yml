@@ -31,6 +31,7 @@ models:
               to: ref('dim_vendor')
               field: lifnr
               config:
+                store_failures: true
                 severity: error
       - name: blart
         data_tests:
@@ -72,6 +73,7 @@ models:
               to: ref('dim_date')
               field: date_day
               config:
+                store_failures: true
                 severity: error
       - name: budat
         data_tests:
@@ -79,18 +81,24 @@ models:
           - relationships:
               to: ref('dim_date')
               field: date_day
+              config:
+                store_failures: true
       - name: netdt
         data_tests:
           - not_null
           - relationships:
               to: ref('dim_date')
               field: date_day
+              config:
+                store_failures: true
       - name: augdt
         description: Fecha de compensacion. NULL mientras la partida sigue abierta.
         data_tests:
           - relationships:
               to: ref('dim_date')
               field: date_day
+              config:
+                store_failures: true
       - name: is_open
         data_tests:
           - not_null
@@ -184,6 +192,7 @@ models:
               to: ref('dim_vendor')
               field: lifnr
               config:
+                store_failures: true
                 severity: error
       - name: clearing_month
         data_tests:
@@ -191,6 +200,8 @@ models:
           - relationships:
               to: ref('dim_date')
               field: date_day
+              config:
+                store_failures: true
       - name: cleared_items
         data_tests:
           - not_null
