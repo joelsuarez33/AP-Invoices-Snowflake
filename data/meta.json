@@ -1,0 +1,13 @@
+{
+  "generated_at": "2026-10-02T15:32:08+00:00",
+  "ledger_cutoff_date": "2026-10-01",
+  "datasets": {
+    "summary": 1,
+    "aging": 6,
+    "vendors": 25,
+    "fx_exposure": 2,
+    "payment_performance": 9,
+    "open_items_trend": 91
+  },
+  "local_currency": "ARS"
+}
