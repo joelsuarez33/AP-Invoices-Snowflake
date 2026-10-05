@@ -4,33 +4,22 @@
     "vendor_name": "PROVEEDOR 002 SA",
     "country": "AR",
     "payment_terms": "Z030",
-    "open_items": 1062,
-    "open_amount_local": -4598336060.54,
-    "overdue_amount_local": -3404259413.05,
-    "avg_days_overdue": 90.4,
-    "fx_revaluation_local": -97013375.66
+    "open_items": 1056,
+    "open_amount_local": -4638269395.35,
+    "overdue_amount_local": -3467005680.24,
+    "avg_days_overdue": 92.4,
+    "fx_revaluation_local": -105445643.11
   },
   {
     "lifnr": "2933",
     "vendor_name": "PROVEEDOR 017 SA",
     "country": "AR",
     "payment_terms": "Z015",
-    "open_items": 449,
-    "open_amount_local": -1931152360.26,
-    "overdue_amount_local": -1482533134.78,
-    "avg_days_overdue": 85.9,
-    "fx_revaluation_local": -35661465.45
-  },
-  {
-    "lifnr": "2306",
-    "vendor_name": "PROVEEDOR 013 SA",
-    "country": "AR",
-    "payment_terms": "Z045",
-    "open_items": 254,
-    "open_amount_local": -1172175825.41,
-    "overdue_amount_local": -968620165.1,
-    "avg_days_overdue": 86.0,
-    "fx_revaluation_local": -22479952.78
+    "open_items": 455,
+    "open_amount_local": -1942344794.63,
+    "overdue_amount_local": -1482838444.37,
+    "avg_days_overdue": 86.3,
+    "fx_revaluation_local": -37387213.45
   },
   {
     "lifnr": "9930",
@@ -38,54 +27,54 @@
     "country": "BR",
     "payment_terms": "Z015",
     "open_items": 245,
-    "open_amount_local": -1130036041.2,
-    "overdue_amount_local": -844896682.12,
-    "avg_days_overdue": 99.5,
-    "fx_revaluation_local": -29163435.71
+    "open_amount_local": -1203966085.86,
+    "overdue_amount_local": -893401779.75,
+    "avg_days_overdue": 100.9,
+    "fx_revaluation_local": -31133075.77
   },
   {
-    "lifnr": "2114",
-    "vendor_name": "PROVEEDOR 011 SA",
-    "country": "IT",
-    "payment_terms": "Z030",
-    "open_items": 93,
-    "open_amount_local": -540113514.39,
-    "overdue_amount_local": -452895130.08,
-    "avg_days_overdue": 107.0,
-    "fx_revaluation_local": -9569117.59
+    "lifnr": "2306",
+    "vendor_name": "PROVEEDOR 013 SA",
+    "country": "AR",
+    "payment_terms": "Z045",
+    "open_items": 260,
+    "open_amount_local": -1184725158.05,
+    "overdue_amount_local": -942766766.74,
+    "avg_days_overdue": 85.4,
+    "fx_revaluation_local": -24500885.13
   },
   {
     "lifnr": "6541",
     "vendor_name": "PROVEEDOR 031 SA",
     "country": "AR",
     "payment_terms": "Z015",
-    "open_items": 118,
-    "open_amount_local": -533718231.26,
-    "overdue_amount_local": -367955470.42,
-    "avg_days_overdue": 82.8,
-    "fx_revaluation_local": -11940308.11
+    "open_items": 117,
+    "open_amount_local": -533339748.33,
+    "overdue_amount_local": -375765605.05,
+    "avg_days_overdue": 85.3,
+    "fx_revaluation_local": -13026914.28
+  },
+  {
+    "lifnr": "2114",
+    "vendor_name": "PROVEEDOR 011 SA",
+    "country": "IT",
+    "payment_terms": "Z030",
+    "open_items": 91,
+    "open_amount_local": -516601133.7,
+    "overdue_amount_local": -437137535.46,
+    "avg_days_overdue": 111.8,
+    "fx_revaluation_local": -10165060.06
   },
   {
     "lifnr": "7618",
     "vendor_name": "PROVEEDOR 036 SA",
     "country": "AR",
     "payment_terms": "Z030",
-    "open_items": 97,
-    "open_amount_local": -433906703.34,
-    "overdue_amount_local": -380528540.49,
-    "avg_days_overdue": 113.1,
-    "fx_revaluation_local": -7758883.52
-  },
-  {
-    "lifnr": "5495",
-    "vendor_name": "PROVEEDOR 024 SA",
-    "country": "BR",
-    "payment_terms": "Z045",
-    "open_items": 83,
-    "open_amount_local": -399757648.07,
-    "overdue_amount_local": -337528275.65,
-    "avg_days_overdue": 71.4,
-    "fx_revaluation_local": -7533898.88
+    "open_items": 95,
+    "open_amount_local": -406673737.03,
+    "overdue_amount_local": -348297626.29,
+    "avg_days_overdue": 117.2,
+    "fx_revaluation_local": -8042510.88
   },
   {
     "lifnr": "6048",
@@ -93,32 +82,43 @@
     "country": "AR",
     "payment_terms": "Z030",
     "open_items": 81,
-    "open_amount_local": -399489784.49,
-    "overdue_amount_local": -296806345.54,
-    "avg_days_overdue": 84.4,
-    "fx_revaluation_local": -5078574.49
+    "open_amount_local": -401312915.47,
+    "overdue_amount_local": -319547893.31,
+    "avg_days_overdue": 87.0,
+    "fx_revaluation_local": -5533375.39
+  },
+  {
+    "lifnr": "5495",
+    "vendor_name": "PROVEEDOR 024 SA",
+    "country": "BR",
+    "payment_terms": "Z045",
+    "open_items": 82,
+    "open_amount_local": -397263363.37,
+    "overdue_amount_local": -341028704.47,
+    "avg_days_overdue": 73.7,
+    "fx_revaluation_local": -8046178.05
   },
   {
     "lifnr": "6172",
     "vendor_name": "PROVEEDOR 029 SA",
     "country": "IT",
     "payment_terms": "Z030",
-    "open_items": 79,
-    "open_amount_local": -387723658.43,
-    "overdue_amount_local": -326474186.87,
-    "avg_days_overdue": 83.8,
-    "fx_revaluation_local": -4428369.26
+    "open_items": 78,
+    "open_amount_local": -383939849.32,
+    "overdue_amount_local": -322011590.39,
+    "avg_days_overdue": 86.8,
+    "fx_revaluation_local": -4787817.39
   },
   {
     "lifnr": "6930",
     "vendor_name": "PROVEEDOR 004 SA",
     "country": "BR",
     "payment_terms": "Z045",
-    "open_items": 76,
-    "open_amount_local": -344412831.91,
-    "overdue_amount_local": -255061048.77,
-    "avg_days_overdue": 103.0,
-    "fx_revaluation_local": -4742212.52
+    "open_items": 77,
+    "open_amount_local": -362861363.93,
+    "overdue_amount_local": -252582458.87,
+    "avg_days_overdue": 103.6,
+    "fx_revaluation_local": -5092854.39
   },
   {
     "lifnr": "2382",
@@ -126,10 +126,10 @@
     "country": "DE",
     "payment_terms": "Z030",
     "open_items": 93,
-    "open_amount_local": -287747299.97,
-    "overdue_amount_local": -249094468.73,
-    "avg_days_overdue": 102.7,
-    "fx_revaluation_local": -8181380.24
+    "open_amount_local": -278171570.64,
+    "overdue_amount_local": -235233724.03,
+    "avg_days_overdue": 103.4,
+    "fx_revaluation_local": -7880456.54
   },
   {
     "lifnr": "4053",
@@ -137,32 +137,43 @@
     "country": "AR",
     "payment_terms": "Z045",
     "open_items": 57,
-    "open_amount_local": -279716105.98,
-    "overdue_amount_local": -184767362.17,
-    "avg_days_overdue": 92.4,
-    "fx_revaluation_local": -4330681.38
+    "open_amount_local": -268516624.8,
+    "overdue_amount_local": -176756479.65,
+    "avg_days_overdue": 94.6,
+    "fx_revaluation_local": -4269454.58
   },
   {
     "lifnr": "1115",
     "vendor_name": "PROVEEDOR 007 SA",
     "country": "AR",
     "payment_terms": "Z030",
-    "open_items": 48,
-    "open_amount_local": -268197769.43,
-    "overdue_amount_local": -197820153.53,
-    "avg_days_overdue": 80.7,
-    "fx_revaluation_local": -2353344.44
+    "open_items": 46,
+    "open_amount_local": -262868786.46,
+    "overdue_amount_local": -184946558.35,
+    "avg_days_overdue": 86.0,
+    "fx_revaluation_local": -2342563.33
   },
   {
     "lifnr": "4457",
     "vendor_name": "PROVEEDOR 020 SA",
     "country": "AR",
     "payment_terms": "Z030",
-    "open_items": 52,
-    "open_amount_local": -248496718.53,
-    "overdue_amount_local": -188702510.58,
-    "avg_days_overdue": 91.4,
-    "fx_revaluation_local": -7845652.66
+    "open_items": 51,
+    "open_amount_local": -246770787.88,
+    "overdue_amount_local": -215937171.53,
+    "avg_days_overdue": 94.8,
+    "fx_revaluation_local": -8316952.95
+  },
+  {
+    "lifnr": "4729",
+    "vendor_name": "PROVEEDOR 022 SA",
+    "country": "AR",
+    "payment_terms": "Z030",
+    "open_items": 48,
+    "open_amount_local": -226683228.18,
+    "overdue_amount_local": -157538822.3,
+    "avg_days_overdue": 85.4,
+    "fx_revaluation_local": -4525532.15
   },
   {
     "lifnr": "4573",
@@ -171,53 +182,53 @@
     "payment_terms": "Z030",
     "open_items": 48,
     "open_amount_local": -223091099.99,
-    "overdue_amount_local": -148820454.71,
-    "avg_days_overdue": 82.9,
-    "fx_revaluation_local": -7429814.86
-  },
-  {
-    "lifnr": "4729",
-    "vendor_name": "PROVEEDOR 022 SA",
-    "country": "AR",
-    "payment_terms": "Z030",
-    "open_items": 50,
-    "open_amount_local": -219249264.2,
-    "overdue_amount_local": -126968902.88,
-    "avg_days_overdue": 81.4,
-    "fx_revaluation_local": -3964615.33
-  },
-  {
-    "lifnr": "1542",
-    "vendor_name": "PROVEEDOR 008 SA",
-    "country": "AR",
-    "payment_terms": "Z015",
-    "open_items": 73,
-    "open_amount_local": -213471443.11,
-    "overdue_amount_local": -158777094.95,
-    "avg_days_overdue": 75.5,
-    "fx_revaluation_local": -1637330.28
+    "overdue_amount_local": -160571231.32,
+    "avg_days_overdue": 85.9,
+    "fx_revaluation_local": -8130038.29
   },
   {
     "lifnr": "8468",
     "vendor_name": "PROVEEDOR 038 SA",
     "country": "US",
     "payment_terms": "Z045",
-    "open_items": 50,
-    "open_amount_local": -213448504.8,
-    "overdue_amount_local": -182427179.16,
-    "avg_days_overdue": 94.5,
-    "fx_revaluation_local": -5573146.54
+    "open_items": 53,
+    "open_amount_local": -214878310.64,
+    "overdue_amount_local": -187429610.32,
+    "avg_days_overdue": 90.3,
+    "fx_revaluation_local": -5901968.86
+  },
+  {
+    "lifnr": "1542",
+    "vendor_name": "PROVEEDOR 008 SA",
+    "country": "AR",
+    "payment_terms": "Z015",
+    "open_items": 70,
+    "open_amount_local": -198121046.38,
+    "overdue_amount_local": -143426698.22,
+    "avg_days_overdue": 81.3,
+    "fx_revaluation_local": -1443508.49
   },
   {
     "lifnr": "2164",
     "vendor_name": "PROVEEDOR 012 SA",
     "country": "AR",
     "payment_terms": "Z030",
-    "open_items": 55,
-    "open_amount_local": -172400304.15,
-    "overdue_amount_local": -122415713.13,
-    "avg_days_overdue": 83.3,
-    "fx_revaluation_local": -4828474.42
+    "open_items": 53,
+    "open_amount_local": -167148442.68,
+    "overdue_amount_local": -122828049.28,
+    "avg_days_overdue": 89.0,
+    "fx_revaluation_local": -5354284.6
+  },
+  {
+    "lifnr": "8452",
+    "vendor_name": "PROVEEDOR 037 SA",
+    "country": "AR",
+    "payment_terms": "Z060",
+    "open_items": 31,
+    "open_amount_local": -161993785.02,
+    "overdue_amount_local": -87630793.0,
+    "avg_days_overdue": 82.9,
+    "fx_revaluation_local": -2464666.76
   },
   {
     "lifnr": "5931",
@@ -226,9 +237,9 @@
     "payment_terms": "Z060",
     "open_items": 33,
     "open_amount_local": -155857966.97,
-    "overdue_amount_local": -135040453.53,
-    "avg_days_overdue": 110.8,
-    "fx_revaluation_local": -3397783.17
+    "overdue_amount_local": -139372071.71,
+    "avg_days_overdue": 113.8,
+    "fx_revaluation_local": -3751234.77
   },
   {
     "lifnr": "6735",
@@ -236,42 +247,31 @@
     "country": "AR",
     "payment_terms": "Z030",
     "open_items": 25,
-    "open_amount_local": -154087613.38,
-    "overdue_amount_local": -108248043.58,
-    "avg_days_overdue": 75.1,
-    "fx_revaluation_local": -1268386.49
-  },
-  {
-    "lifnr": "8452",
-    "vendor_name": "PROVEEDOR 037 SA",
-    "country": "AR",
-    "payment_terms": "Z060",
-    "open_items": 29,
-    "open_amount_local": -153725391.95,
-    "overdue_amount_local": -87630793.0,
-    "avg_days_overdue": 87.7,
-    "fx_revaluation_local": -2182635.99
+    "open_amount_local": -154244154.75,
+    "overdue_amount_local": -114120486.46,
+    "avg_days_overdue": 76.4,
+    "fx_revaluation_local": -1427084.37
   },
   {
     "lifnr": "1646",
     "vendor_name": "PROVEEDOR 009 SA",
     "country": "AR",
     "payment_terms": "Z030",
-    "open_items": 36,
-    "open_amount_local": -137094558.93,
+    "open_items": 37,
+    "open_amount_local": -138133851.2,
     "overdue_amount_local": -125772872.5,
-    "avg_days_overdue": 91.1,
-    "fx_revaluation_local": -2961901.88
+    "avg_days_overdue": 90.5,
+    "fx_revaluation_local": -3161730.34
   },
   {
-    "lifnr": "7485",
-    "vendor_name": "PROVEEDOR 035 SA",
+    "lifnr": "5911",
+    "vendor_name": "PROVEEDOR 025 SA",
     "country": "BR",
-    "payment_terms": "Z045",
-    "open_items": 37,
-    "open_amount_local": -117896424.73,
-    "overdue_amount_local": -63033125.79,
-    "avg_days_overdue": 67.7,
-    "fx_revaluation_local": -3840142.19
+    "payment_terms": "Z030",
+    "open_items": 26,
+    "open_amount_local": -118440077.96,
+    "overdue_amount_local": -70437245.65,
+    "avg_days_overdue": 96.0,
+    "fx_revaluation_local": -3543371.5
   }
 ]
