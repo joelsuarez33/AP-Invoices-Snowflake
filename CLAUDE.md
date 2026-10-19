@@ -109,6 +109,15 @@ All Snowflake config arrives as **repository secrets** (including object names);
 - Scheduled runs start hours after the cron time; the "up to yesterday in AR" rule makes that harmless.
 - Git Bash on Windows rewrites env values that start with `/` into Windows paths. Run `NEXT_PUBLIC_BASE_PATH=/x npm run build` from PowerShell instead.
 
+### Query agent (`agent/`)
+
+Terminal agent over the ledger, documented in `docs/AGENTE.md`. Dependencies live in `requirements-agent.txt`, not in the pipeline's `requirements.txt`.
+
+- `ledger.py` builds an in-memory DuckDB table `items` from the `artifacts` state (cached in `agent/data/`) plus the seeds, re-implementing the mart rules (aging vs cutoff, FX revaluation). **It works without Snowflake.** `python -m agent.ledger` reconciles it against `web/public/data/summary.json`; if the dbt models change, keep both in sync and re-run that check. `--sql` and `--export` (Excel/CSV) are for manual verification.
+- `tools.py`: typed `@beta_tool` functions, each a fixed parameterized query. The model never writes SQL. Raise `ToolError` for bad input (it reaches the model as a readable `is_error` result). Return the percentages the model needs (`pct_*`) instead of letting it compute them: Haiku did arithmetic on its own and got it wrong. Keep `FUNCTIONS` order stable (it is the start of the cached prompt).
+- `chat.py`: Tool Runner with streaming, `claude-haiku-5-5` by default (`AGENT_MODEL`, `AGENT_EFFORT`). Append-only history; a failed turn is dropped whole. Needs a **workspace-scoped** `ANTHROPIC_API_KEY` (org-scoped keys require `anthropic-workspace-id`). `load_dotenv` does not override a session variable: a stale key exported by `load_env.ps1` wins silently, and the chat warns about it.
+- `audit.py`: every question is appended to `agent/logs/audit.jsonl` (question, answer, each tool call, the SQL it ran, SHA-256 of every result). `python -m agent.audit replay <id>` re-runs the SQL and compares hashes; that is the idempotency proof. The wording of answers may vary between runs; tool calls and results must not.
+
 ### SQL scripts
 
 `sql/00_setup_account.sql` (ACCOUNTADMIN; replace `<<RSA_PUBLIC_KEY>>`), `01_setup_raw.sql` (stage, file format, RAW table), `02_copy_fbl1n.sql` (reference copy of `load.py::copy_statement`; keep the two in sync), `03_verify_pipeline.sql` (read-only checks: volume, versions, mart vs RAW, FX coverage, snapshot, stored failures), `99_teardown.sql`.

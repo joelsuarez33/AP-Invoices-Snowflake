@@ -14,6 +14,12 @@ de procedencia.
 Las dos se republican despues de cada corrida del pipeline, desde la rama
 `gh-pages`.
 
+**Agente de consulta:** preguntas en lenguaje natural desde la terminal
+(`python -m agent.chat`). Claude responde llamando a herramientas tipadas sobre
+el ledger, sin escribir SQL, y cada respuesta queda auditada con el SQL que
+ejecuto. Casos de uso, verificacion manual (SQL y Excel), auditoria e
+idempotencia: [docs/AGENTE.md](docs/AGENTE.md).
+
 ---
 
 ## Que problema resuelve
@@ -335,6 +341,7 @@ sql/                    setup de cuenta y RAW, COPY de referencia,
                         verificacion manual, teardown
 dbt_ap/                 proyecto dbt
 docs/DECISIONS.md       decisiones de diseno (ADRs)
+agent/                  agente de consulta: ledger local, herramientas, chat, auditoria
 web/                    tablero Next.js que lee los JSON, publicado en Pages
 .github/workflows/      pipeline.yml, ci.yml y pages.yml
 ```

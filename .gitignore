@@ -41,3 +41,9 @@ __pycache__/
 Thumbs.db
 .idea/
 .vscode/
+
+# --- agente ---
+# Cache del estado del ledger que agent/ledger.py baja de la rama artifacts.
+agent/data/
+# Registro de auditoria local del agente (preguntas, SQL ejecutado y respuestas).
+agent/logs/
