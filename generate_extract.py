@@ -77,6 +77,12 @@ CREDIT_DOC_TYPES = (("KR", 0.85), ("RE", 0.15))
 DEBIT_DOC_TYPES = (("KG", 0.40), ("KZ", 0.60))
 P_CREDIT_DOCUMENT = 0.90
 CORRECTION_FACTOR = (0.85, 1.15)
+# Tolerancia para considerar que DMBTR corresponde a WRBTR a la cotizacion de
+# BLDAT, en unidades de moneda extranjera. Un documento nuevo deriva WRBTR de
+# DMBTR redondeando a centavos, asi que WRBTR * cotizacion puede diferir de
+# DMBTR hasta medio centavo de dolar por la cotizacion. Mas que eso no es
+# redondeo: el importe en pesos se calculo con otra cotizacion.
+REEXPRESSION_TOLERANCE = 0.005
 
 FILENAME_DATE_RE = re.compile(r"FBL1N_(\d{8})\.xlsx$", re.IGNORECASE)
 
@@ -441,6 +447,41 @@ class FeedGenerator:
             corrected.append(doc)
         return corrected
 
+    def _reexpress_amounts(self, run_date: dt.date) -> list[dict[str, Any]]:
+        """Re-expresa en pesos los documentos cuyo DMBTR no sale de la cotizacion de BLDAT.
+
+        Cuando cambia la serie de cotizaciones -- en 2026-10 se reemplazo la
+        sintetica por la oficial del BCRA --, los documentos ya emitidos quedan
+        con un importe en pesos calculado a otra cotizacion. Se corrigen como
+        lo haria un extracto real: re-emitiendo el documento completo con el
+        mismo BELNR. RAW conserva la version anterior, el QUALIFY de staging se
+        queda con esta, y snap_ap_amounts registra el cambio.
+
+        Se conserva WRBTR, que es lo que dice la factura en su moneda, y se
+        recalcula DMBTR. La revision corre todos los dias pero solo encuentra
+        algo despues de un cambio de serie: un documento ya re-expresado, o uno
+        nuevo, cuadra dentro de la tolerancia de redondeo.
+
+        No consume el RNG, asi que no altera el resto del feed del dia.
+        """
+        reexpressed = []
+        for belnr, doc in sorted(self.universe.items()):
+            if doc["WAERS"] == doc["HWAER"]:
+                continue
+            rate = fx_rate(self.rates, doc["BLDAT"], doc["WAERS"])
+            expected = round(doc["WRBTR"] * rate, 2)
+            if abs(doc["DMBTR"] - expected) <= REEXPRESSION_TOLERANCE * rate + 0.01:
+                continue
+            updated = dict(doc)
+            updated["DMBTR"] = expected
+            if updated["AUGDT"] is None:
+                # VERZN solo existe mientras la partida esta abierta, y lo
+                # calcula el report al dia del extracto.
+                updated["VERZN"] = (run_date - dt.date.fromisoformat(updated["NETDT"])).days
+            self.universe[belnr] = updated
+            reexpressed.append(updated)
+        return reexpressed
+
     # -- feed completo ----------------------------------------------------
     def _clearing_target(self, created: int) -> int:
         """Cuantas partidas compensar para que el backlog no crezca sin control.
@@ -462,6 +503,9 @@ class FeedGenerator:
         n_corrections = _stochastic_round(rng, CORRECTION_SHARE * base_rows)
         n_late = min(_stochastic_round(rng, LATE_ARRIVING_SHARE * base_rows), n_created)
 
+        # Antes que todo lo demas: lo que se compense o corrija hoy parte del
+        # importe ya re-expresado.
+        reexpressed = self._reexpress_amounts(run_date)
         cleared = self._clear_items(rng, run_date, n_cleared)
         touched = {int(d["BELNR"]) for d in cleared}
 
@@ -478,19 +522,23 @@ class FeedGenerator:
         for doc in corrections:
             self.universe[int(doc["BELNR"])] = doc
 
-        feed = cleared + created + corrections
+        # Las re-expresiones van primero: si el mismo documento se compensa o se
+        # corrige hoy, esa version posterior es la que queda en el archivo.
+        feed = reexpressed + cleared + created + corrections
         # Un BELNR aparece a lo sumo una vez por archivo: dentro de una corrida
         # no hay ambiguedad de version que resolver.
         by_document = {int(d["BELNR"]): d for d in feed}
         rows = sorted(by_document.values(), key=lambda d: (int(d["LIFNR"]), int(d["BELNR"])))
 
         log.info(
-            "%s | creados=%d (late=%d) compensados=%d correcciones=%d filas=%d abiertas=%d",
+            "%s | creados=%d (late=%d) compensados=%d correcciones=%d reexpresiones_fx=%d "
+            "filas=%d abiertas=%d",
             run_date,
             len(created),
             n_late,
             len(cleared),
             len(corrections),
+            len(reexpressed),
             len(rows),
             sum(1 for d in self.universe.values() if d["AUGDT"] is None),
         )

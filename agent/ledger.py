@@ -30,6 +30,8 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import os
+import shutil
 import subprocess
 import sys
 from decimal import Decimal
@@ -44,6 +46,17 @@ SEEDS_DIR = REPO_ROOT / "dbt_ap" / "seeds"
 DATA_DIR = Path(__file__).resolve().parent / "data"
 STATE_CACHE = DATA_DIR / "ledger_state.json"
 SUMMARY_PATH = REPO_ROOT / "web" / "public" / "data" / "summary.json"
+
+# Proyeccion local: el generador corrido en agent/data/landing desde el estado
+# de artifacts hasta ayer, igual que lo haria el pipeline. Sirve mientras el
+# pipeline no pueda publicar (por ejemplo, con Snowflake suspendido): el
+# generador es determinista, asi que lo que se proyecta aca es exactamente lo
+# que el pipeline va a generar y cargar cuando vuelva a correr.
+PROJECTION_DIR = DATA_DIR / "landing"
+PROJECTION_STATE = PROJECTION_DIR / "_state.json"
+
+# Argentina no tiene horario de verano: UTC-3 todo el ano.
+AR_TZ = dt.timezone(dt.timedelta(hours=-3))
 
 ARTIFACTS_REF = "origin/artifacts"
 STATE_IN_ARTIFACTS = "state/_state.json"
@@ -63,7 +76,59 @@ class LedgerError(RuntimeError):
 # estado
 # ---------------------------------------------------------------------------
 def fetch_state(refresh: bool = False) -> dict[str, Any]:
-    """Estado del ledger: del cache local, o de la rama artifacts si no hay cache.
+    """Estado mas reciente disponible: el de artifacts o la proyeccion local.
+
+    `_source` queda en el dict para saber de que archivo salio, y con eso
+    calcular la huella del dataset.
+    """
+    state = _artifacts_state(refresh)
+    state["_source"] = str(STATE_CACHE)
+    if PROJECTION_STATE.exists():
+        projected = json.loads(PROJECTION_STATE.read_text(encoding="utf-8"))
+        if projected["last_run_date"] > state["last_run_date"]:
+            projected["_source"] = str(PROJECTION_STATE)
+            return projected
+    return state
+
+
+def advance() -> str:
+    """Avanza la proyeccion local hasta ayer, con los mismos pasos que el pipeline.
+
+    Actualiza las cotizaciones del BCRA, parte del estado de artifacts si el
+    pipeline esta mas adelantado que la proyeccion, y corre el generador.
+    Devuelve el ultimo dia generado.
+    """
+    subprocess.run([sys.executable, str(REPO_ROOT / "scripts" / "update_fx_rates.py")], check=True)
+
+    published = _artifacts_state(refresh=True)
+    PROJECTION_DIR.mkdir(parents=True, exist_ok=True)
+    projected_date = (
+        json.loads(PROJECTION_STATE.read_text(encoding="utf-8"))["last_run_date"]
+        if PROJECTION_STATE.exists()
+        else ""
+    )
+    if projected_date < published["last_run_date"]:
+        # El pipeline llego mas lejos que la proyeccion: se descarta y se
+        # vuelve a partir del estado publicado.
+        for stale in PROJECTION_DIR.glob("FBL1N_*.xlsx"):
+            stale.unlink()
+        shutil.copyfile(STATE_CACHE, PROJECTION_STATE)
+        projected_date = published["last_run_date"]
+
+    target = (dt.datetime.now(AR_TZ).date() - dt.timedelta(days=1)).isoformat()
+    if projected_date >= target:
+        return projected_date
+    subprocess.run(
+        [sys.executable, str(REPO_ROOT / "generate_extract.py"), "--until", target],
+        check=True,
+        cwd=REPO_ROOT,
+        env={**os.environ, "LANDING_DIR": str(PROJECTION_DIR)},
+    )
+    return target
+
+
+def _artifacts_state(refresh: bool = False) -> dict[str, Any]:
+    """Estado publicado por el pipeline: del cache local, o de la rama artifacts.
 
     El cache existe para que la demo no dependa de git ni de red una vez que
     los datos se bajaron.
@@ -299,12 +364,14 @@ def reconcile(con: duckdb.DuckDBPyConnection, state: dict[str, Any]) -> list[dic
     reference = json.loads(SUMMARY_PATH.read_text(encoding="utf-8"))
     cutoff = local["ledger_cutoff_date"].isoformat()
     if reference.get("ledger_cutoff_date") != cutoff:
+        # No es una falla: la proyeccion local esta mas adelante que el ultimo
+        # export de Snowflake, y no hay contra que comparar a este corte.
         checks.append(
             {
-                "control": "corte de summary.json",
+                "control": "corte de summary.json (sin referencia al mismo corte)",
                 "local": cutoff,
                 "referencia": reference.get("ledger_cutoff_date"),
-                "ok": False,
+                "ok": None,
             }
         )
         return checks
@@ -322,14 +389,14 @@ def load(refresh: bool = False) -> tuple[duckdb.DuckDBPyConnection, dict[str, An
     return build(state), state
 
 
-def dataset_fingerprint() -> str:
+def dataset_fingerprint(state: dict[str, Any]) -> str:
     """SHA-256 del estado y de los seeds: identifica el dataset sobre el que se respondio.
 
     Si dos respuestas tienen la misma huella, se calcularon sobre exactamente
     los mismos datos, y su SQL tiene que devolver exactamente lo mismo.
     """
     digest = hashlib.sha256()
-    for path in [STATE_CACHE, *sorted(SEEDS_DIR.glob("*.csv"))]:
+    for path in [Path(state["_source"]), *sorted(SEEDS_DIR.glob("*.csv"))]:
         digest.update(path.name.encode("utf-8"))
         digest.update(path.read_bytes())
     return digest.hexdigest()
@@ -379,10 +446,22 @@ def _fmt(value: Any) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Carga y reconcilia el ledger local del agente.")
     parser.add_argument("--refresh", action="store_true", help="vuelve a traer el estado de artifacts")
+    parser.add_argument(
+        "--avanzar",
+        action="store_true",
+        help="actualiza cotizaciones y genera en local hasta ayer, como el pipeline",
+    )
     parser.add_argument("--export", action="store_true", help="exporta la tabla items a Excel y CSV")
     parser.add_argument("--sql", help="ejecuta una consulta sobre la base local (tabla items)")
     parser.add_argument("--sql-file", type=Path, help="idem, leyendo la consulta de un archivo")
     args = parser.parse_args(argv)
+
+    if args.avanzar:
+        try:
+            print(f"Proyeccion local al {advance()}.\n")
+        except (subprocess.CalledProcessError, LedgerError) as exc:
+            print(f"ERROR al avanzar el ledger: {exc}", file=sys.stderr)
+            return 1
 
     try:
         con, state = load(refresh=args.refresh)
@@ -401,22 +480,26 @@ def main(argv: list[str] | None = None) -> int:
     if args.export:
         for path in export(con, state["last_run_date"]):
             print(f"Exportado: {path}")
-        print(f"Huella del dataset: {dataset_fingerprint()}")
+        print(f"Huella del dataset: {dataset_fingerprint(state)}")
         return 0
 
-    print(f"Ledger al {state['last_run_date']}: {documents_in_state(state)} documentos en el estado.\n")
+    print(f"Ledger al {state['last_run_date']}: {documents_in_state(state)} documentos en el estado.")
+    print(f"Fuente: {state['_source']}\n")
     checks = reconcile(con, state)
     width = max(len(c["control"]) for c in checks)
     for check in checks:
-        mark = "OK " if check["ok"] else "MAL"
+        mark = {True: "OK ", False: "MAL", None: " - "}[check["ok"]]
         print(f"  [{mark}] {check['control']:<{width}}  local={_fmt(check['local'])}  "
               f"referencia={_fmt(check['referencia'])}")
 
-    failed = [c for c in checks if not c["ok"]]
+    failed = [c for c in checks if c["ok"] is False]
     print()
     if failed:
         print(f"{len(failed)} control(es) no cuadran: la capa local no es fiel a la mart.")
         return 1
+    if any(c["ok"] is None for c in checks):
+        print("Sin export de Snowflake a este corte: solo se verifico que todos los documentos entran.")
+        return 0
     print("La capa local cuadra con la mart exportada desde Snowflake.")
     return 0
 

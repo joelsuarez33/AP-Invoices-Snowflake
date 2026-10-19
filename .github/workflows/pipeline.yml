@@ -91,6 +91,15 @@ jobs:
           fi
           python -c "import json,pathlib; s=json.loads(pathlib.Path('landing/_state.json').read_text()); print('last_run_date:', s['last_run_date'], '| abiertas:', s['open_items'])"
 
+      - name: Actualizar cotizaciones del BCRA
+        # La serie FX es la oficial del BCRA (API de estadisticas cambiarias) y
+        # se completa hasta ayer en cada corrida: el generador la necesita para
+        # la cotizacion de BLDAT de cada documento nuevo, y dbt seed la carga.
+        # Las cotizaciones historicas no cambian, asi que reescribir el archivo
+        # entero es idempotente. Si el BCRA no responde, la corrida se corta
+        # aca, antes de generar con una serie incompleta.
+        run: python scripts/update_fx_rates.py
+
       - name: Generar el change feed
         # Sin inputs, lleva el ledger desde last_run_date + 1 hasta AYER en hora
         # de Buenos Aires. El avance lo marca _state.json y no el calendario del
@@ -195,11 +204,13 @@ jobs:
           set -euo pipefail
           git config user.name  'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add web/public/data
+          # El seed de cotizaciones viaja en el mismo commit: main queda con la
+          # serie que uso esta corrida, y una corrida local parte de la misma.
+          git add web/public/data dbt_ap/seeds/fx_rates.csv
           if git diff --cached --quiet; then
             echo "Los datasets no cambiaron."
           else
-            git commit -m "tablero: datasets al $(date -u +%Y-%m-%d) [skip ci]"
+            git commit -m "tablero: datasets y cotizaciones al $(date -u +%Y-%m-%d) [skip ci]"
             git push origin HEAD:${{ github.ref_name }}
           fi
 

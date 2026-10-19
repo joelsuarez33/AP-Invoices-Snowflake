@@ -207,9 +207,9 @@ def cmd_replay(question_id: str) -> int:
     from agent import ledger, tools
 
     r = find(question_id)
-    con, _ = ledger.load()
+    con, state = ledger.load()
     tools.bind(con)
-    fingerprint = ledger.dataset_fingerprint()
+    fingerprint = ledger.dataset_fingerprint(state)
     same_data = fingerprint == r.get("dataset_sha256")
     print(f"Replay de {r['id']}: {r['question']}")
     print(f"Dataset {'IDENTICO' if same_data else 'DISTINTO'} al de la respuesta original "

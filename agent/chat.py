@@ -113,14 +113,16 @@ def _describe_call(block: Any) -> str:
 class Session:
     """Una conversacion. El historial es append-only: nunca se edita un turno ya enviado."""
 
-    def __init__(self, client: anthropic.Anthropic, system: str, cutoff: str) -> None:
+    def __init__(
+        self, client: anthropic.Anthropic, system: str, cutoff: str, dataset_sha256: str
+    ) -> None:
         self.client = client
         self.system = system
         self.cutoff = cutoff
         self.history: list[dict[str, Any]] = []
         self.usage = Usage()
         self.session_id = uuid.uuid4().hex[:8]
-        self.dataset_sha256 = ledger.dataset_fingerprint()
+        self.dataset_sha256 = dataset_sha256
 
     def ask(self, question: str) -> None:
         checkpoint = len(self.history)
@@ -198,11 +200,13 @@ def build_session() -> Session:
     con, state = ledger.load()
     tools.bind(con)
     checks = ledger.reconcile(con, state)
-    failed = [c["control"] for c in checks if not c["ok"]]
+    failed = [c["control"] for c in checks if c["ok"] is False]
     if failed:
         print(f"Aviso: la capa local no cuadra con la mart en: {', '.join(failed)}.")
     system = SYSTEM_TEMPLATE.format(cutoff=state["last_run_date"])
-    return Session(anthropic.Anthropic(), system, state["last_run_date"])
+    return Session(
+        anthropic.Anthropic(), system, state["last_run_date"], ledger.dataset_fingerprint(state)
+    )
 
 
 def _ask(session: Session, question: str) -> bool:

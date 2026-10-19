@@ -157,6 +157,12 @@ unico lugar que castea es `stg_fbl1n__items`.
 | Revaluacion cambiaria de abiertas en USD y EUR | -182.838.690,63 ARS |
 | Reintento de una corrida ya cargada | 0 archivos procesados, 0 filas duplicadas |
 
+Estos numeros son con la serie de cotizaciones sintetica original. Desde
+2026-10 la serie es la oficial del BCRA, y los 2.315 documentos en moneda
+extranjera se re-expresaron a esa cotizacion como un evento del change feed
+([ADR-012](docs/DECISIONS.md)). Los valores al dia y como verificarlos estan en
+[docs/AGENTE.md](docs/AGENTE.md).
+
 ---
 
 ## Como correrlo
@@ -254,7 +260,8 @@ dbt test --select assert_mart_reconciles_with_raw
 **`pipeline.yml`** corre con cron `0 9 * * 1-5` (06:00 en Buenos Aires), con
 push a `main` y a mano con `workflow_dispatch`:
 
-1. Restaura `_state.json` desde la rama `artifacts`.
+1. Restaura `_state.json` desde la rama `artifacts` y actualiza las
+   cotizaciones oficiales del BCRA hasta ayer (`scripts/update_fx_rates.py`).
 2. Genera desde `last_run_date + 1` hasta ayer en hora argentina. El lunes
    genera viernes, sabado y domingo, y una segunda corrida el mismo dia no
    genera nada.
@@ -262,7 +269,8 @@ push a `main` y a mano con `workflow_dispatch`:
 4. Publica `_state.json`, `manifest.json` y `run_results.json` en `artifacts`.
    Si no hay commit o el push falla, el job termina en rojo. Ese commit mantiene
    activo el repo: GitHub deshabilita los cron tras 60 dias sin actividad.
-5. Exporta los datasets y los commitea en `main` con `[skip ci]`.
+5. Exporta los datasets y los commitea en `main` con `[skip ci]`, junto con el
+   seed de cotizaciones.
 
 La configuracion llega por secrets del repositorio: `SNOWFLAKE_ACCOUNT`,
 `SNOWFLAKE_USER`, `SNOWFLAKE_ROLE`, `SNOWFLAKE_WAREHOUSE`,

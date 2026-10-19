@@ -1,8 +1,9 @@
 # Registro de decisiones
 
-Once decisiones del pipeline, cada una con contexto, decision, alternativas
-descartadas y consecuencias. Las ocho primeras son de diseno. Las tres ultimas
-salen de fallas que detectaron los tests de dbt.
+Doce decisiones del pipeline, cada una con contexto, decision, alternativas
+descartadas y consecuencias. Las ocho primeras son de diseno, las tres
+siguientes salen de fallas que detectaron los tests de dbt, y la ultima
+reemplaza la serie de cotizaciones sintetica por la oficial del BCRA.
 
 Los numeros son de Snowflake al 2026-09-13, con el ledger al 2026-09-12: 67
 extractos diarios, 9.023 filas en RAW, 7.002 documentos.
@@ -20,6 +21,7 @@ extractos diarios, 9.023 filas en RAW, 7.002 documentos.
 | 009 | Falla: `relationships` de `lifnr`, 4.518 filas, seed desactualizado |
 | 010 | Falla: `not_null` de `fx_rate_at_document_date`, 754 filas, serie FX incompleta |
 | 011 | Falla: el snapshot no guarda historia de un backfill |
+| 012 | Cotizaciones reales del BCRA, y re-expresion de importes como evento del change feed |
 
 ---
 
@@ -469,8 +471,9 @@ por 3 monedas. Es el mismo horizonte que el calendario de `dim_date`
 
 - Al 13/09, el `BLDAT` minimo en RAW es 2026-02-06, la serie arranca el
   2026-01-01 y la mart tiene 0 filas con cotizacion nula.
-- La serie y el calendario terminan el 2027-12-31. Antes de esa fecha hay que
-  extender los dos. Si no, el mismo test vuelve a fallar.
+- Desde ADR-012 la serie es la oficial del BCRA y se completa hasta ayer en
+  cada corrida, asi que la cobertura ya no depende de extenderla a mano. El
+  calendario de `dim_date` sigue terminando el 2027-12-31.
 
 ---
 
@@ -513,3 +516,77 @@ corridas del workflow.
   lunes, que genera viernes, sabado y domingo, o un backfill manual. Si un
   documento se corrige dos veces dentro de esa ventana, el snapshot registra
   solo la ultima version. RAW conserva las dos.
+
+---
+
+## ADR-012 — Cotizaciones reales del BCRA, y re-expresion de importes como evento del change feed
+
+### Contexto
+
+La serie de `fx_rates.csv` era sintetica: un random walk con drift que generaba
+`scripts/enrich_baseline.py`. Con los meses se alejo de la real. Al 2026-10-06
+el dolar sintetico estaba en 1.770,78 y el oficial en 1.520,00 (+16 %), y el
+euro en 2.007,59 contra 1.712,13.
+
+El generador deriva `WRBTR = DMBTR / cotizacion` a `BLDAT`, asi que el importe
+en pesos de los 2.315 documentos en USD y EUR estaba calculado con esa serie.
+Recalculados con la cotizacion real, suman 13,2 % menos. Ademas habia 63
+documentos en moneda extranjera con exactamente $ 25.000.000: el tope del
+generador, visible porque el importe en pesos era el de referencia. El agente
+de consulta lo marco como inconsistencia.
+
+### Decision
+
+La unica fuente de cotizaciones pasa a ser la API de estadisticas cambiarias
+del BCRA (`tipoCotizacion`, pesos por unidad de moneda extranjera).
+`scripts/update_fx_rates.py` reescribe el seed desde el 2026-01-01 hasta ayer,
+con un valor por dia calendario: fines de semana y feriados toman la ultima
+cotizacion habil anterior, que es la que estaba vigente. El pipeline lo corre
+antes de generar, y commitea el seed junto con los datasets.
+
+Los documentos ya emitidos se corrigen como lo haria un extracto real:
+re-emitiendolos completos con el mismo `BELNR`. El generador revisa en cada
+corrida si el `DMBTR` de un documento en moneda extranjera corresponde a
+`WRBTR` por la cotizacion de su `BLDAT`, con una tolerancia de medio centavo de
+la moneda extranjera por la cotizacion. Si no corresponde, lo re-emite con
+`DMBTR = WRBTR x cotizacion` y conserva `WRBTR`. La revision no consume el RNG,
+asi que el resto del feed del dia no cambia.
+
+### Alternativas descartadas
+
+- **Reescribir la historia.** Borrar RAW y recargarlo como si siempre se
+  hubiera usado la serie real. Rompe la regla append-only (ADR-004), pierde la
+  version anterior de cada documento y obliga a regenerar extractos que hoy
+  solo existen en RAW.
+- **Conservar `DMBTR` y recalcular `WRBTR`.** La factura dice lo que dice en su
+  moneda. Lo que dependia de la serie sintetica es la conversion a pesos.
+- **Corregir en dbt.** Un modelo que re-exprese los importes haria que la mart
+  dejara de reflejar el origen: el extracto seguiria diciendo otra cosa, y la
+  reconciliacion contra RAW perderia sentido.
+- **Dejar la serie sintetica.** Cualquier analisis de exposicion cambiaria
+  sobre una serie inventada no dice nada.
+
+### Consecuencias
+
+- El extracto del 2026-10-07 trae 2.373 filas en vez de unas 60: las 2.315
+  re-expresiones mas el feed normal. El checksum cuadra. Desde el 2026-10-08 la
+  revision no encuentra nada que re-expresar.
+- Verificado al 2026-10-18: 0 documentos en moneda extranjera fuera de
+  tolerancia, de 2.416.
+- `snap_ap_amounts` va a cerrar 2.315 versiones en una sola corrida. Es una
+  correccion de datos, no de negocio: al analizar correcciones de importe, hay
+  que excluir las de esa corrida.
+- La revaluacion de las abiertas al 2026-10-18 es de -$ 186,1M (USD -150,7M,
+  EUR -35,4M). Con la serie sintetica, al 2026-10-06, era -$ 348,6M.
+- La serie termina ayer, no en 2027-12-31. Si la API del BCRA no responde, el
+  pipeline se corta antes de generar, en lugar de generar con una serie
+  incompleta.
+- Las 184 facturas en pesos con exactamente $ 25.000.000 quedan como estan: no
+  dependen de ninguna cotizacion y no hay un valor real al que corregirlas.
+- El `summary.json` del 2026-10-06 se calculo con la serie sintetica y deja de
+  servir como referencia de la reconciliacion del agente. La proxima corrida
+  del pipeline publica uno nuevo.
+- Mientras Snowflake este suspendido, la correccion vive en la proyeccion local
+  del agente (`python -m agent.ledger --avanzar`). Como el generador es
+  determinista, cuando el pipeline vuelva va a generar y cargar exactamente
+  los mismos extractos.
