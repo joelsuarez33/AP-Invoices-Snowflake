@@ -2,7 +2,7 @@
     config(
         materialized = 'incremental',
         incremental_strategy = 'merge',
-        unique_key = 'belnr',
+        unique_key = ['bukrs', 'belnr', 'gjahr', 'buzei'],
         merge_exclude_columns = ['dbt_created_at'],
         on_schema_change = 'append_new_columns',
         cluster_by = ['is_open', 'netdt'],
@@ -66,7 +66,10 @@ final as (
 
     select
         -- --- claves ---
+        enriched.bukrs,
         enriched.belnr,
+        enriched.gjahr,
+        enriched.buzei,
         enriched.kidno,
         enriched.lifnr,
         enriched.xblnr,
@@ -148,8 +151,24 @@ select * from final
 
 {% if is_incremental() %}
 
+{#-
+    Ventana de la corrida. Dagster pasa las fechas de la particion (o del
+    rango de un backfill) como vars; sin vars -- una corrida de dbt a mano --
+    vale la regla de siempre: lo que llego despues del ultimo extracto.
+
+    Con la ventana explicita, reprocesar un dia viejo vuelve a mergear lo que
+    trajo ese extracto. Con `> max(_extract_date)` ese dia quedaba afuera
+    (ADR-003): la particion es la que dice que procesar, no la tabla.
+-#}
+{%- set window_start = var('extract_window_start', none) -%}
+{%- set window_end = var('extract_window_end', none) %}
+
 where
+    {% if window_start %}
+    _extract_date between '{{ window_start }}' and '{{ window_end }}'
+    {% else %}
     _extract_date > (select max(_extract_date) from {{ this }})
+    {% endif %}
     or is_open
 
 {% endif %}

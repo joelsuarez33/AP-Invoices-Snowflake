@@ -25,6 +25,8 @@ load_macros_from_path = dbt_ap/macros
 local_currency = ARS
 date_spine_start = 2026-01-01
 date_spine_end = 2027-12-31
+default_company_code = 1000
+default_line_item = 1
 
 [sqlfluff:rules:capitalisation.keywords]
 capitalisation_policy = lower

@@ -25,7 +25,18 @@ sources:
           Partidas del ledger de acreedores tal como las emitio el report.
           Todas las columnas de negocio son STRING: el casteo es
           responsabilidad exclusiva de stg_fbl1n__items.
+        meta:
+          dagster:
+            # El asset de Dagster que carga esta tabla. Lo usa el translator de
+            # orchestration/dbt_assets.py para conectar el linaje.
+            asset_key: ["raw_fbl1n_change_feed"]
         columns:
+          - name: BUKRS
+            description: Sociedad (contrato v2, desde 2026-10-07). Vacia en extractos anteriores.
+          - name: GJAHR
+            description: Ejercicio (contrato v2, desde 2026-10-07). Vacio en extractos anteriores.
+          - name: BUZEI
+            description: Posicion del documento (contrato v2, desde 2026-10-07). Vacia en extractos anteriores.
           - name: BELNR
             description: Numero de documento. Estable entre re-emisiones -- es la clave del merge.
             data_tests:

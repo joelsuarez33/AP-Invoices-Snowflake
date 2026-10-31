@@ -2,9 +2,11 @@
 # fallback: si falta una variable, dbt aborta antes de conectarse en lugar de
 # apuntar en silencio a un destino por defecto.
 #
-# Dos targets segun de donde viene la clave privada:
-#   dev -> private_key_path, el .p8 vive en disco (desarrollo local)
-#   ci  -> private_key,      el PEM llega por el secret store de GitHub
+# Los dos targets leen la clave privada de un archivo (private_key_path):
+#   dev -> el .p8 vive en disco, fuera del repo (desarrollo local)
+#   ci  -> el workflow escribe el secret de GitHub a un archivo temporal del
+#          runner con permisos 600, y lo borra al terminar
+# Difieren en threads y en el query_tag, que separa el costo en el historial.
 #
 # No hay target con password: el usuario de servicio se crea con TYPE = SERVICE
 # y solo acepta key-pair.
@@ -39,7 +41,7 @@ dbt_ap:
       warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE') }}"
       database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
       schema: "{{ env_var('SNOWFLAKE_SCHEMA_ANALYTICS') }}"
-      private_key: "{{ env_var('SNOWFLAKE_PRIVATE_KEY') }}"
+      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH') }}"
       private_key_passphrase: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PASSPHRASE', '') }}"
       threads: 8
       client_session_keep_alive: false

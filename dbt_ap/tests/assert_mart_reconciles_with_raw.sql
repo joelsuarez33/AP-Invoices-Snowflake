@@ -36,8 +36,20 @@ with raw_deduplicated as (
     select
         cast(nullif(trim(dmbtr), '') as number(19, 2)) as dmbtr
     from {{ source('sap_fi', 'fbl1n_items') }}
+    -- La clave se deriva igual que en staging para los extractos anteriores
+    -- al contrato v2, que no traen sociedad, ejercicio ni posicion.
     qualify row_number() over (
-            partition by belnr
+            partition by
+                coalesce(nullif(trim(bukrs), ''), '{{ var("default_company_code") }}'),
+                belnr,
+                coalesce(
+                    try_cast(nullif(trim(gjahr), '') as number(4, 0)),
+                    year(to_date(nullif(trim(budat), ''), 'DD.MM.YYYY'))
+                ),
+                coalesce(
+                    try_cast(nullif(trim(buzei), '') as number(10, 0)),
+                    {{ var("default_line_item") }}
+                )
             order by _extract_date desc, _file_row_number desc
         ) = 1
 

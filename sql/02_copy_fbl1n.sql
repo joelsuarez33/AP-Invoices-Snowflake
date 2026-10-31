@@ -6,9 +6,10 @@
 -- que diagnosticar una carga, y para que la sentencia sea revisable en el PR
 -- sin leer Python.
 --
--- Idempotencia: sin FORCE, COPY INTO consulta el load history del stage y saltea
--- los archivos ya cargados durante 64 dias. No hay deduplicacion propia en la
--- ingesta a proposito -- seria reimplementar peor una garantia del motor.
+-- Idempotencia por particion (ADR-014): cargar un dia es, en una transaccion,
+-- borrar las filas de su _EXTRACT_DATE y copiar su archivo con FORCE.
+-- Reprocesarlo deja exactamente las filas del extracto, sin depender del load
+-- history de COPY INTO, que vence a los 64 dias.
 -- =============================================================================
 
 USE ROLE AP_PIPELINE;
@@ -17,42 +18,60 @@ USE DATABASE AP_ANALYTICS;
 USE SCHEMA RAW;
 
 -- -----------------------------------------------------------------------------
--- 1. Subir los CSV normalizados (equivalente a lo que hace load.py con PUT)
+-- 0. Columnas del contrato (load.py::ensure_columns_statements)
+-- -----------------------------------------------------------------------------
+-- Las columnas nuevas del contrato se agregan solas y como STRING, igual que
+-- el resto de RAW. Las de la version 2 del contrato:
+ALTER TABLE AP_ANALYTICS.RAW.FBL1N_ITEMS ADD COLUMN IF NOT EXISTS BUKRS STRING;
+ALTER TABLE AP_ANALYTICS.RAW.FBL1N_ITEMS ADD COLUMN IF NOT EXISTS GJAHR STRING;
+ALTER TABLE AP_ANALYTICS.RAW.FBL1N_ITEMS ADD COLUMN IF NOT EXISTS BUZEI STRING;
+
+-- -----------------------------------------------------------------------------
+-- 1. Subir el CSV normalizado de la particion (load.py::put_statement)
 -- -----------------------------------------------------------------------------
 -- PUT no se puede ejecutar desde una worksheet web: correrlo con SnowSQL o
--- dejarlo en manos de load.py.
---   PUT 'file:///ruta/al/repo/staging_files/FBL1N_20260907.csv' @STG_FBL1N
---       AUTO_COMPRESS = TRUE OVERWRITE = FALSE PARALLEL = 4;
+-- dejarlo en manos de load.py. OVERWRITE = TRUE: reprocesar un dia reemplaza
+-- su archivo en el stage.
+--   PUT 'file:///ruta/al/repo/staging_files/FBL1N_20261007.csv' @STG_FBL1N
+--       AUTO_COMPRESS = TRUE OVERWRITE = TRUE PARALLEL = 4;
 
-LIST @STG_FBL1N PATTERN = '.*FBL1N_[0-9]{8}[.]csv([.]gz)?';
+LIST @STG_FBL1N PATTERN = '.*FBL1N_20261007[.]csv([.]gz)?';
 
 -- -----------------------------------------------------------------------------
--- 2. COPY INTO con transformacion
+-- 2. DELETE de la particion + COPY de su archivo, en una transaccion
+--    (load.py::load_partition)
 -- -----------------------------------------------------------------------------
 -- La metadata de carga se agrega en el SELECT: METADATA$FILENAME y
 -- METADATA$FILE_ROW_NUMBER identifican el origen exacto de cada fila, y
 -- _EXTRACT_DATE se parsea del nombre del archivo -- no de la fecha de carga,
 -- que cambiaria en un re-proceso y arruinaria el orden del change feed.
+BEGIN;
+
+DELETE FROM AP_ANALYTICS.RAW.FBL1N_ITEMS WHERE _EXTRACT_DATE = '2026-10-07';
+
 COPY INTO AP_ANALYTICS.RAW.FBL1N_ITEMS (
         ICON_STATUS, LIFNR, KIDNO, XBLNR, BELNR, XREF1, ZLSCH, ZLSPR, VERZN,
         WRBTR, WAERS, DMBTR, HWAER, BLDAT, BUDAT, NETDT, AUGDT, AUGBL,
-        BLART, USNAM, GKONT,
+        BLART, USNAM, GKONT, BUKRS, GJAHR, BUZEI,
         _SOURCE_FILE, _FILE_ROW_NUMBER, _LOADED_AT, _EXTRACT_DATE
 )
 FROM (
     SELECT
         t.$1,  t.$2,  t.$3,  t.$4,  t.$5,  t.$6,  t.$7,  t.$8,  t.$9,
         t.$10, t.$11, t.$12, t.$13, t.$14, t.$15, t.$16, t.$17, t.$18,
-        t.$19, t.$20, t.$21,
+        t.$19, t.$20, t.$21, t.$22, t.$23, t.$24,
         METADATA$FILENAME,
         METADATA$FILE_ROW_NUMBER,
         CURRENT_TIMESTAMP(),
         TO_DATE(REGEXP_SUBSTR(METADATA$FILENAME, 'FBL1N_([0-9]{8})', 1, 1, 'e', 1), 'YYYYMMDD')
     FROM @STG_FBL1N t
 )
-PATTERN     = '.*FBL1N_[0-9]{8}[.]csv([.]gz)?'
+FILES       = ('FBL1N_20261007.csv.gz')
 FILE_FORMAT = (FORMAT_NAME = 'FF_FBL1N_CSV')
-ON_ERROR    = 'ABORT_STATEMENT';
+ON_ERROR    = 'ABORT_STATEMENT'
+FORCE       = TRUE;
+
+COMMIT;
 
 -- -----------------------------------------------------------------------------
 -- 3. Verificacion de la carga

@@ -11,7 +11,7 @@ name: GitHub Pages
 
 on:
   workflow_run:
-    workflows: ["Pipeline diario"]
+    workflows: ["Pipeline diario (Dagster)"]
     types: [completed]
     branches: [main]
   workflow_dispatch:
@@ -43,7 +43,6 @@ jobs:
       SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
       SNOWFLAKE_SCHEMA_RAW: ${{ secrets.SNOWFLAKE_SCHEMA_RAW }}
       SNOWFLAKE_SCHEMA_ANALYTICS: ${{ secrets.SNOWFLAKE_SCHEMA_ANALYTICS }}
-      SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
       SNOWFLAKE_PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
 
     steps:
@@ -67,6 +66,18 @@ jobs:
 
       - name: Instalar dependencias de Python
         run: pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Escribir la clave privada a un archivo temporal
+        # Mismo modo que el pipeline: el secret llega solo a este paso, se
+        # escribe con permisos 600 y los pasos siguientes reciben la ruta.
+        env:
+          SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key_file="$RUNNER_TEMP/snowflake_key.p8"
+          python -c 'import os, sys; open(sys.argv[1], "w").write(os.environ["SNOWFLAKE_PRIVATE_KEY"].replace("\\n", "\n").strip() + "\n")' "$key_file"
+          echo "SNOWFLAKE_PRIVATE_KEY_PATH=$key_file" >> "$GITHUB_ENV"
 
       - name: dbt deps
         working-directory: dbt_ap
@@ -118,3 +129,7 @@ jobs:
             echo "::error::Fallo el push a gh-pages. El sitio publicado no se actualizo."
             exit 1
           fi
+
+      - name: Borrar la clave privada
+        if: always()
+        run: rm -f "$RUNNER_TEMP/snowflake_key.p8"

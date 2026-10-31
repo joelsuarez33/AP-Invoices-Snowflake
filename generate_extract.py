@@ -46,6 +46,7 @@ import openpyxl
 from openpyxl.utils import get_column_letter
 
 import config
+from contract import check_extract, to_contract_record
 
 log = logging.getLogger("generate_extract")
 
@@ -86,7 +87,7 @@ REEXPRESSION_TOLERANCE = 0.005
 
 FILENAME_DATE_RE = re.compile(r"FBL1N_(\d{8})\.xlsx$", re.IGNORECASE)
 
-INTEGER_COLUMNS = ("LIFNR", "KIDNO", "BELNR", "AUGBL", "VERZN")
+INTEGER_COLUMNS = ("LIFNR", "KIDNO", "BELNR", "AUGBL", "VERZN", "GJAHR", "BUZEI")
 
 
 # ---------------------------------------------------------------------------
@@ -150,11 +151,30 @@ def _docs_to_state(universe: dict[int, dict[str, Any]]) -> dict[str, Any]:
     return {"columns": columns, "rows": rows}
 
 
+def with_document_key(doc: dict[str, Any]) -> dict[str, Any]:
+    """Completa la clave del documento si viene de antes de la version 2 del contrato.
+
+    Los mismos valores que deriva stg_fbl1n__items: si el generador y staging
+    derivaran distinto, el documento re-emitido no colapsaria con su version
+    anterior.
+    """
+    doc.setdefault("BUKRS", None)
+    doc.setdefault("GJAHR", None)
+    doc.setdefault("BUZEI", None)
+    if doc["BUKRS"] is None:
+        doc["BUKRS"] = config.DEFAULT_COMPANY_CODE
+    if doc["GJAHR"] is None:
+        doc["GJAHR"] = dt.date.fromisoformat(doc["BUDAT"]).year
+    if doc["BUZEI"] is None:
+        doc["BUZEI"] = config.DEFAULT_LINE_ITEM
+    return doc
+
+
 def _docs_from_state(blob: dict[str, Any]) -> dict[int, dict[str, Any]]:
     columns = blob["columns"]
     universe: dict[int, dict[str, Any]] = {}
     for row in blob["rows"]:
-        doc = dict(zip(columns, row, strict=True))
+        doc = with_document_key(dict(zip(columns, row, strict=True)))
         universe[int(doc["BELNR"])] = doc
     return universe
 
@@ -170,22 +190,24 @@ def read_extract(path: Path) -> list[dict[str, Any]]:
 
     if not rows:
         raise ValueError(f"{path.name}: archivo vacio")
-    header = tuple(str(c) if c is not None else "" for c in rows[0])
-    if header != config.EXCEL_HEADERS:
-        raise ValueError(f"{path.name}: encabezados fuera de contrato")
+    header, body = rows[0], rows[1:]
+    marker = list(header).index(config.EXCEL_HEADERS[config.COL_INDEX["ICON_STATUS"]])
+    detail = [r for r in body if r[marker] != config.TOTAL_ROW_MARKER]
+    # Lectura por nombre de columna, no por posicion: el replay tiene que
+    # poder leer extractos de cualquier version del contrato.
+    report = check_extract(header, detail, extract_date_from_filename(path), config.CONTRACT)
+    if report.blocking:
+        raise ValueError(f"{path.name}: {report.summary()}")
 
     documents = []
-    for row in rows[1:]:
-        if row[0] == config.TOTAL_ROW_MARKER:
-            continue
-        doc: dict[str, Any] = {}
-        for column, value in zip(config.RAW_COLUMNS, row, strict=True):
+    for row in detail:
+        doc = to_contract_record(header, row, config.CONTRACT)
+        for column, value in doc.items():
             if isinstance(value, dt.datetime):
-                value = value.date().isoformat()
+                doc[column] = value.date().isoformat()
             elif isinstance(value, dt.date):
-                value = value.isoformat()
-            doc[column] = value
-        documents.append(doc)
+                doc[column] = value.isoformat()
+        documents.append(with_document_key(doc))
     return documents
 
 
@@ -360,6 +382,11 @@ class FeedGenerator:
             "BLART": blart,
             "USNAM": _weighted_choice(rng, self.user_weights),
             "GKONT": config.RECON_ACCOUNT,
+            # Clave completa del documento (contrato v2). Una sola sociedad, el
+            # ejercicio es el ano contable y la linea del acreedor es la 1.
+            "BUKRS": config.DEFAULT_COMPANY_CODE,
+            "GJAHR": budat.year,
+            "BUZEI": config.DEFAULT_LINE_ITEM,
         }
         self._apply_fx(doc)
         return doc
@@ -618,9 +645,20 @@ def resolve_dates(args: argparse.Namespace, last_run: dt.date, today: dt.date) -
 def run(args: argparse.Namespace) -> int:
     state = load_state(config.STATE_PATH)
     last_run = dt.date.fromisoformat(state["last_run_date"])
-    today = dt.date.today()
+    dates = resolve_dates(args, last_run, dt.date.today())
+    generate(dates, state)
+    return 0
 
-    dates = resolve_dates(args, last_run, today)
+
+def generate(dates: list[dt.date], state: dict[str, Any] | None = None) -> list[Path]:
+    """Genera los extractos de `dates`, en orden, y avanza el estado.
+
+    La usan la CLI y el asset de Dagster. `dates` tiene que ser consecutiva y
+    empezar en el dia siguiente al estado: el feed de un dia depende del
+    universo que dejo el anterior.
+    """
+    if state is None:
+        state = load_state(config.STATE_PATH)
     log.info("Generando %d dia(s): %s -> %s", len(dates), dates[0], dates[-1])
 
     rates = load_fx_rates(config.FX_RATES_PATH)
@@ -632,11 +670,13 @@ def run(args: argparse.Namespace) -> int:
         steady_state_open=int(state["open_items"]),
     )
 
+    written: list[Path] = []
     for run_date in dates:
         rows = generator.feed_for(run_date)
         filename = config.EXTRACT_FILENAME_TEMPLATE.format(yyyymmdd=run_date.strftime("%Y%m%d"))
         path = config.LANDING_DIR / filename
         total = write_extract(path, rows)
+        written.append(path)
         log.info("%s | %d filas | total local %.2f ARS", filename, len(rows), total)
 
         state.update(
@@ -654,7 +694,7 @@ def run(args: argparse.Namespace) -> int:
         )
         save_state(config.STATE_PATH, state)
 
-    return 0
+    return written
 
 
 def build_parser() -> argparse.ArgumentParser:

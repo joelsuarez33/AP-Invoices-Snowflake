@@ -1,0 +1,16 @@
+# Hooks de pre-commit. Instalar una vez por clon:
+#   pre-commit install
+# Correr sobre todo el repo:
+#   pre-commit run --all-files
+repos:
+  # Escaneo de secretos antes de cada commit. El mismo gitleaks corre en CI
+  # sobre la historia completa (.github/workflows/ci.yml).
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      - id: ruff

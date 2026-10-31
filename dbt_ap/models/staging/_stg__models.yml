@@ -4,9 +4,29 @@ models:
   - name: stg_fbl1n__items
     description: >
       Partidas del ledger de acreedores, casteadas y resueltas a estado actual.
-      Una fila por BELNR: el QUALIFY se queda con la ultima version que emitio
-      el change feed. El historial completo sigue estando en RAW.
+      Una fila por documento (sociedad, numero, ejercicio, posicion): el
+      QUALIFY se queda con la ultima version que emitio el change feed. El
+      historial completo sigue estando en RAW.
+    data_tests:
+      # La misma unicidad la verifica el asset check de Dagster
+      # (stg_document_key_unique) despues de cada corrida.
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: ['bukrs', 'belnr', 'gjahr', 'buzei']
+          config:
+            severity: error
     columns:
+      - name: bukrs
+        description: Sociedad. Derivada (1000) en extractos anteriores al contrato v2.
+        data_tests:
+          - not_null
+      - name: gjahr
+        description: Ejercicio. Derivado del ano de BUDAT en extractos anteriores al contrato v2.
+        data_tests:
+          - not_null
+      - name: buzei
+        description: Posicion del documento. Derivada (1) en extractos anteriores al contrato v2.
+        data_tests:
+          - not_null
       - name: belnr
         description: Numero de documento. Clave del modelo y del merge de la mart.
         data_tests:
