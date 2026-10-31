@@ -3,13 +3,27 @@ openpyxl==3.1.5
 python-dotenv==1.0.1
 snowflake-connector-python==3.12.3
 cryptography==43.0.3
+PyYAML==6.0.3
 
 # --- transformacion ---
 dbt-core==1.8.7
 dbt-snowflake==1.8.4
+
+# --- orquestacion ---
+# dagster-snowflake no se usa: con snowflake-connector-python 3.12.3 pip solo
+# resuelve una version muy vieja. El recurso de Snowflake envuelve load.connect().
+dagster==1.13.28
+dagster-webserver==1.13.28
+dagster-dbt==0.29.28
+# dbt-core 1.8 exige protobuf < 5. dagster acepta protobuf >= 4, pero la ultima
+# grpcio-health-checking pide >= 7.35: fijarla mantiene el arbol resoluble.
+protobuf==4.25.9
+grpcio-health-checking==1.62.3
 
 # --- calidad ---
 # sqlfluff usa el templater jinja, no el de dbt: linteamos sin conexion y sin
 # resolver dependencias. Por eso no aparece sqlfluff-templater-dbt.
 ruff==0.16.6
 sqlfluff==4.3.0
+pytest==8.4.2
+pre-commit==4.7.0

@@ -16,6 +16,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from contract import load_contract
+
 REPO_ROOT = Path(__file__).resolve().parent
 
 load_dotenv(REPO_ROOT / ".env")
@@ -24,40 +26,27 @@ load_dotenv(REPO_ROOT / ".env")
 # ---------------------------------------------------------------------------
 # Layout del extracto FBL1N
 # ---------------------------------------------------------------------------
-# La variante de layout usada en SAP exporta 21 columnas con encabezados en
-# espanol. El orden es parte del contrato: normalize.py valida la secuencia
-# completa antes de tocar una sola fila.
+# El layout sale de contracts/fbl1n_extract.yml, que es tambien lo que valida
+# el schema check. Aca se exponen las mismas columnas con los nombres que ya
+# usaban los scripts, para que el contrato sea uno solo.
 #
 # (encabezado literal en el xlsx, campo SAP / nombre de columna en RAW)
-COLUMNS: tuple[tuple[str, str], ...] = (
-    ("Icono part.abiertas/comp.", "ICON_STATUS"),
-    ("Acreedor", "LIFNR"),
-    ("Clave de referencia", "KIDNO"),
-    ("Referencia", "XBLNR"),
-    ("Nº documento", "BELNR"),
-    ("Clave referencia 1", "XREF1"),
-    ("Vía de pago", "ZLSCH"),
-    ("Bloqueo de pago", "ZLSPR"),
-    ("Demora tras vencimiento neto", "VERZN"),
-    ("Importe en moneda doc.", "WRBTR"),
-    ("Moneda del documento", "WAERS"),
-    ("Importe en moneda local", "DMBTR"),
-    ("Moneda local", "HWAER"),
-    ("Fecha de documento", "BLDAT"),
-    ("Fe.contabilización", "BUDAT"),
-    ("Vencimiento neto", "NETDT"),
-    ("Fecha compensación", "AUGDT"),
-    ("Doc.compensación", "AUGBL"),
-    ("Clase de documento", "BLART"),
-    ("Nombre del usuario", "USNAM"),
-    ("Cta.contrapartida", "GKONT"),
-)
+CONTRACT = load_contract()
+COLUMNS: tuple[tuple[str, str], ...] = tuple((c.header, c.field) for c in CONTRACT.columns)
 
-EXCEL_HEADERS: tuple[str, ...] = tuple(h for h, _ in COLUMNS)
-RAW_COLUMNS: tuple[str, ...] = tuple(c for _, c in COLUMNS)
+EXCEL_HEADERS: tuple[str, ...] = CONTRACT.headers
+RAW_COLUMNS: tuple[str, ...] = CONTRACT.fields
 
-# Indices posicionales usados por generate_extract.py y normalize.py.
+# Indices posicionales en el orden del contrato: es el orden en que el
+# generador escribe el xlsx y normalize.py el CSV que levanta COPY INTO.
 COL_INDEX: dict[str, int] = {c: i for i, c in enumerate(RAW_COLUMNS)}
+
+# Clave del documento contable en SAP. Los extractos anteriores a la version 2
+# del contrato no la traen completa: el generador y staging la derivan con
+# estos valores (sociedad unica, ejercicio = ano de BUDAT, posicion 1).
+DOCUMENT_KEY: tuple[str, ...] = ("BUKRS", "BELNR", "GJAHR", "BUZEI")
+DEFAULT_COMPANY_CODE = "1000"
+DEFAULT_LINE_ITEM = 1
 
 DATE_COLUMNS: tuple[str, ...] = ("BLDAT", "BUDAT", "NETDT", "AUGDT")
 AMOUNT_COLUMNS: tuple[str, ...] = ("WRBTR", "DMBTR")
@@ -76,7 +65,7 @@ CHECKSUM_TOLERANCE = 0.01
 # texto tal como lo muestra el report; el casteo ocurre recien en staging.
 SAP_DATE_FORMAT = "%d.%m.%Y"
 
-EXCEL_SHEET_NAME = "Sheet1"
+EXCEL_SHEET_NAME = CONTRACT.sheet
 EXTRACT_FILENAME_TEMPLATE = "FBL1N_{yyyymmdd}.xlsx"
 EXTRACT_FILENAME_GLOB = "FBL1N_*.xlsx"
 STAGING_FILENAME_TEMPLATE = "FBL1N_{yyyymmdd}.csv"

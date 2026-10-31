@@ -1,9 +1,10 @@
 # Registro de decisiones
 
-Doce decisiones del pipeline, cada una con contexto, decision, alternativas
+Quince decisiones del pipeline, cada una con contexto, decision, alternativas
 descartadas y consecuencias. Las ocho primeras son de diseno, las tres
-siguientes salen de fallas que detectaron los tests de dbt, y la ultima
-reemplaza la serie de cotizaciones sintetica por la oficial del BCRA.
+siguientes salen de fallas que detectaron los tests de dbt, la 012 reemplaza la
+serie de cotizaciones sintetica por la oficial del BCRA, y las tres ultimas
+llegan con Dagster como orquestador.
 
 Los numeros son de Snowflake al 2026-09-13, con el ledger al 2026-09-12: 67
 extractos diarios, 9.023 filas en RAW, 7.002 documentos.
@@ -22,6 +23,9 @@ extractos diarios, 9.023 filas en RAW, 7.002 documentos.
 | 010 | Falla: `not_null` de `fx_rate_at_document_date`, 754 filas, serie FX incompleta |
 | 011 | Falla: el snapshot no guarda historia de un backfill |
 | 012 | Cotizaciones reales del BCRA, y re-expresion de importes como evento del change feed |
+| 013 | Dagster como orquestador: assets particionados por dia, backfills en una sola corrida |
+| 014 | Idempotencia por particion: DELETE + COPY en una transaccion (reemplaza en parte a 008) |
+| 015 | Contrato del extracto versionado, validado antes de cargar, y clave completa del documento |
 
 ---
 
@@ -386,6 +390,10 @@ corrida.
   subir un archivo mientras siga en el stage. Si se borraran archivos (`REMOVE`
   o `PURGE`) y se subieran de nuevo pasada la ventana, `COPY` los cargaria otra
   vez. Por eso no se borran archivos del stage.
+- **Reemplazado en parte por ADR-014.** Con particiones y backfills hacia falta
+  poder reprocesar un dia a proposito, y el load history lo impide. La
+  idempotencia paso a ser por particion (DELETE + COPY con FORCE); el stage
+  interno y el COPY con transformacion se mantienen.
 - Cada resume del warehouse factura 60 segundos como minimo, y por eso cada
   script abre una sola conexion.
 
@@ -412,7 +420,7 @@ habia sembrado.
 
 ### Decision
 
-- Los seeds se cargan en cada corrida. `pipeline.yml` corre `dbt build`, que
+- Los seeds se cargan en cada corrida. El job de Dagster corre `dbt build`, que
   incluye `dbt seed`, asi que el CSV del repo y la tabla no pueden divergir por
   mas de una corrida.
 - Un seed se compara por cantidad de filas y por contenido, no por las primeras
@@ -590,3 +598,172 @@ asi que el resto del feed del dia no cambia.
   del agente (`python -m agent.ledger --avanzar`). Como el generador es
   determinista, cuando el pipeline vuelva va a generar y cargar exactamente
   los mismos extractos.
+
+---
+
+## ADR-013 — Dagster como orquestador: assets particionados por dia, backfills en una sola corrida
+
+### Contexto
+
+Hasta 2026-10 la orquestacion era un workflow de GitHub Actions que corria cinco
+scripts en secuencia. Alcanzaba para la corrida diaria, pero no para lo que vino
+despues: reprocesar un dia puntual o un rango, saber en que estado quedo cada
+dia de cada tabla, atar los controles de calidad a los datos que controlan y
+frenar la carga cuando el extracto cambia de forma. Reprocesar el 2026-10-07 era
+editar los inputs del workflow; el estado de cada dia no existia en ningun lado.
+
+### Decision
+
+Dagster OSS como orquestador, con assets en lugar de tasks:
+
+- La ingesta son dos assets: `fbl1n_extract` (el archivo del dia) y
+  `raw_fbl1n_change_feed` (la carga a RAW). dbt entra con `@dbt_assets` sobre
+  el manifest: cada seed, modelo y snapshot es un asset, y sus tests son checks.
+- Particion diaria (`DailyPartitionsDefinition`, America/Argentina/Buenos_Aires,
+  desde 2026-07-08). La ultima particion es ayer: el extracto del dia D se toma
+  el D+1.
+- `BackfillPolicy.single_run` en todos los assets: un rango es una corrida.
+- Job `fbl1n_daily` y schedule a las 06:00 hora argentina. El schedule arranca
+  detenido: lo dispara GitHub Actions con `dagster job execute`, pasando el
+  rango en los tags de particion.
+- El recurso de Snowflake envuelve `load.connect()` y no tiene campos de
+  configuracion: las credenciales salen del entorno y nunca quedan en el
+  historial de una corrida.
+
+### Alternativas descartadas
+
+- **Seguir con GitHub Actions solo.** Sin estado por particion, sin checks
+  atados a los datos, y cada backfill a mano.
+- **Airflow.** Un DAG de tasks modela pasos, no datos: la relacion entre una
+  task y la tabla que produce queda implicita. Ademas suma un scheduler, una
+  base de metadatos y workers para un pipeline de una fuente que corre una vez
+  por dia.
+- **Backfills de una corrida por dia** (la politica por defecto). El generador
+  es secuencial, y N corridas paralelas no garantizan el orden. Ademas son N
+  resumes del warehouse y N `dbt build`.
+- **`dagster-snowflake`.** Con `snowflake-connector-python==3.12.3`, pip solo
+  resuelve la version 0.11.14, muy anterior a dagster 1.13, y seria un segundo
+  camino de conexion para mantener.
+- **Un daemon de Dagster corriendo todo el tiempo.** Un servidor encendido las
+  24 horas para una corrida diaria. GitHub Actions ya es el runner.
+
+### Consecuencias
+
+- En CI la instancia de Dagster es efimera: el historial de corridas no
+  persiste entre ejecuciones del workflow. El estado que importa vive en la rama
+  `artifacts` y en RAW, y por eso el check de frescura consulta RAW y no la
+  instancia.
+- dagster 1.13 y dbt-core 1.8 conviven fijando `protobuf==4.25.9` y
+  `grpcio-health-checking==1.62.3`: la ultima version de ese paquete exige
+  protobuf 7, y dbt 1.8, menos de 5.
+- `backfill_policy` esta en beta en dagster 1.13 y emite un aviso al cargar.
+- En Windows, `click` expande comodines en los argumentos de la CLI: un
+  `--select` con asterisco se convierte en la lista de archivos. El workflow
+  ejecuta el job con tags de rango, que funciona igual en Windows y en Linux.
+
+---
+
+## ADR-014 — Idempotencia por particion: DELETE + COPY en una transaccion
+
+### Contexto
+
+ADR-008 dejaba la idempotencia en manos del load history de `COPY INTO`: un
+archivo ya cargado se saltea durante 64 dias. Con particiones y backfills, en
+cambio, reprocesar un dia es una operacion normal, y el load history la impide.
+Saltea el archivo, o, con `FORCE`, lo vuelve a cargar encima del anterior.
+
+### Decision
+
+Cargar un dia es, en este orden:
+
+1. `PUT` del CSV del dia con `OVERWRITE = TRUE`. Va fuera de la transaccion,
+   porque el PUT no es transaccional.
+2. En una transaccion: `DELETE` de las filas con ese `_EXTRACT_DATE` y
+   `COPY INTO` de ese unico archivo (`FILES = (...)`, `FORCE = TRUE`).
+3. `COMMIT`. Ante cualquier error, `ROLLBACK`: el dia queda como estaba.
+
+RAW sigue siendo append-only entre dias. Una particion solo reemplaza las filas
+de su propio extracto, nunca las versiones que trajeron otros dias.
+
+### Alternativas descartadas
+
+- **MERGE por clave de documento.** Colapsaria las versiones de un documento en
+  una, y RAW existe para guardarlas todas (ADR-002, ADR-004).
+- **Seguir con el load history.** No deja reprocesar a proposito, y su ventana
+  de 64 dias era una fuente de duplicados latente (ADR-008).
+- **Reescribir la tabla entera.** Reprocesar un dia no deberia tocar los demas.
+- **Deduplicar en staging.** Esconde los duplicados en lugar de no crearlos, y
+  la reconciliacion contra RAW los veria igual.
+
+### Consecuencias
+
+- Verificado con pytest contra un warehouse falso que suma las filas de cada
+  COPY: materializar dos veces la misma particion deja el mismo conteo, y un
+  backfill de tres dias repetido tampoco duplica. Si la carga no borrara la
+  particion antes, esos tests fallarian.
+- Desaparece el riesgo de ADR-008: el COPY carga solo el archivo pedido, asi
+  que borrar archivos del stage ya no puede provocar una recarga.
+- Una corrida de N dias hace N DELETE + COPY sobre una sola conexion.
+- `sql/02_copy_fbl1n.sql` reproduce la misma secuencia para correrla a mano.
+
+---
+
+## ADR-015 — Contrato del extracto versionado, validado antes de cargar, y clave completa del documento
+
+### Contexto
+
+El layout era una tupla en `config.py`, y `normalize.py` validaba el encabezado
+exacto, columna por columna. Cualquier cambio de layout rechazaba el archivo,
+incluso uno inocuo como una columna nueva al final, y el error no distinguia un
+cambio inocuo de uno que rompe los modelos.
+
+Ademas, la clave del modelo era `BELNR`. En SAP un numero de documento solo es
+unico dentro de una sociedad (`BUKRS`) y un ejercicio (`GJAHR`), y la posicion
+(`BUZEI`) distingue las lineas de un mismo documento.
+
+### Decision
+
+- `contracts/fbl1n_extract.yml` es la fuente unica del layout: encabezado, campo
+  y tipo de cada columna. `config.py` arma de ahi las columnas que usan el
+  generador, `normalize.py` y la carga.
+- Tipos: `string`, `code` (entero o texto), `integer`, `decimal`, `date`.
+- Una columna con `since` solo es obligatoria para extractos de esa fecha en
+  adelante.
+- Reglas del schema check: columna faltante o tipo distinto es ERROR y bloquea;
+  columna desconocida es WARN y se ignora.
+- El check vive en `fbl1n_extract`, un asset separado de la carga y con
+  `blocking=True`: un extracto invalido no llega a Snowflake, y dbt no corre.
+- El CSV que se carga tiene siempre todas las columnas del contrato, en su
+  orden. La carga agrega a RAW las columnas nuevas del contrato con
+  `ADD COLUMN IF NOT EXISTS`.
+- La version 2 del contrato agrega `BUKRS`, `GJAHR` y `BUZEI` desde el
+  2026-10-07. El generador las emite; para los extractos anteriores, staging y
+  el generador las derivan con los mismos valores (1000, el ano de `BUDAT` y 1).
+  El `QUALIFY` de staging, el merge de la mart y la reconciliacion usan la clave
+  de cuatro campos. La unicidad la verifican un test de dbt y el asset check
+  `stg_document_key_unique`.
+
+### Alternativas descartadas
+
+- **Derivar la clave solo en staging, sin cambiar el contrato.** La clave de
+  cuatro campos seria artificial: el origen nunca la mandaria.
+- **Validar por posicion, como antes.** Rechaza cambios inocuos y no distingue
+  la severidad.
+- **Validar despues de cargar.** El archivo invalido ya estaria en RAW, que es
+  append-only.
+- **Tipos estrictos para los codigos (solo enteros).** `GKONT` llega como
+  numero en el baseline y como texto en los extractos generados, a veces
+  mezclado dentro del mismo archivo. Un tipo estricto rechazaria archivos
+  legitimos.
+
+### Consecuencias
+
+- La mart cambio la clave del merge. La primera corrida despues de este cambio
+  tiene que reconstruirla con `full_refresh` (input del workflow o config del
+  asset de dbt): mergear contra la tabla vieja, que no tiene esas columnas,
+  insertaria cada documento de nuevo.
+- `snap_ap_amounts` sigue con `unique_key = 'belnr'`. Hay una sola sociedad, y
+  cambiar la clave de un snapshot implica rehacer su historia.
+- Reprocesar un extracto v1 con el contrato v2 funciona: el `since` lo permite y
+  staging deriva la clave.
+- dbt pasa de 142 a 146 tests. pytest cubre el contrato caso por caso.

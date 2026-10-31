@@ -1,9 +1,11 @@
 name: CI
 
-# Validacion estatica de cada PR, sin conexion a Snowflake: ruff, sqlfluff,
-# dbt deps y dbt parse. No hay secrets en este workflow a proposito. Lo que
-# necesita el warehouse -- compilar is_incremental(), correr modelos y tests --
-# lo hace pipeline.yml en cada corrida contra datos reales.
+# Validacion de cada PR, sin conexion a Snowflake y sin secrets:
+#   ruff, sqlfluff, dbt deps + dbt parse, carga de las Definitions de Dagster,
+#   pytest (contrato, ingesta y assets contra un warehouse falso) y gitleaks
+#   sobre la historia completa del repo.
+# Lo que necesita el warehouse -- compilar is_incremental(), correr modelos y
+# tests de dbt -- lo hace el workflow diario (dagster_daily.yml).
 
 on:
   pull_request:
@@ -19,18 +21,18 @@ permissions:
 
 jobs:
   lint:
-    name: Lint y parse
+    name: Lint, parse, Dagster, tests y secretos
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     env:
       # Absoluta: los pasos de dbt corren con working-directory dbt_ap, y una
       # ruta relativa se resolveria como dbt_ap/dbt_ap.
       DBT_PROFILES_DIR: ${{ github.workspace }}/dbt_ap
       # Valores de relleno, NO secretos. profiles.yml resuelve todo por env_var()
-      # sin fallback, asi que dbt necesita que las variables existan para
-      # renderizar el perfil -- pero `dbt parse` no abre ninguna conexion, y
-      # estos nombres no dan acceso a nada.
+      # sin fallback, asi que dbt y Dagster necesitan que las variables existan
+      # para cargar el proyecto -- pero nada de este workflow abre una conexion,
+      # y estos nombres no dan acceso a nada.
       SNOWFLAKE_ACCOUNT: parse-only
       SNOWFLAKE_USER: parse-only
       SNOWFLAKE_ROLE: AP_PIPELINE
@@ -39,9 +41,13 @@ jobs:
       SNOWFLAKE_SCHEMA_RAW: RAW
       SNOWFLAKE_SCHEMA_ANALYTICS: ANALYTICS
       SNOWFLAKE_PRIVATE_KEY_PATH: /dev/null
+      GITLEAKS_VERSION: "8.30.1"
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # gitleaks escanea la historia completa, no solo el ultimo commit.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -51,6 +57,19 @@ jobs:
 
       - name: Instalar dependencias
         run: pip install --disable-pip-version-check -r requirements.txt
+
+      - name: gitleaks
+        # Binario de la release oficial, verificado contra su checksum antes de
+        # ejecutarlo. --redact: si encontrara algo, el log no lo repite.
+        run: |
+          set -euo pipefail
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL -o "$RUNNER_TEMP/$tarball" "$base/$tarball"
+          curl -sSfL -o "$RUNNER_TEMP/checksums.txt" "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          (cd "$RUNNER_TEMP" && grep " $tarball\$" checksums.txt | sha256sum -c -)
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git --redact --verbose --exit-code 1 .
 
       - name: ruff
         run: ruff check .
@@ -65,11 +84,24 @@ jobs:
         run: dbt deps
 
       - name: dbt parse
-        # Valida jinja, refs, sources, exposures y el YAML de tests, todo sin
-        # tocar Snowflake. Es la barrera real de este workflow.
+        # Valida jinja, refs, sources, exposures y el YAML de tests sin tocar
+        # Snowflake, y deja el manifest que leen las Definitions de Dagster.
         #
         # dbt compile queda afuera a proposito: para resolver is_incremental()
         # le pregunta al warehouse si la relacion existe, y eso despertaria AP_WH
         # (60 segundos minimos de facturacion) en cada push a un PR.
         working-directory: dbt_ap
         run: dbt parse
+
+      - name: Validar las Definitions de Dagster
+        # Carga assets, checks, job, schedule y recursos. Los recursos no abren
+        # conexiones al cargarse.
+        run: |
+          mkdir -p "$RUNNER_TEMP/dagster_home"
+          touch "$RUNNER_TEMP/dagster_home/dagster.yaml"
+          DAGSTER_HOME="$RUNNER_TEMP/dagster_home" dagster definitions validate -m orchestration.definitions
+
+      - name: pytest
+        # Contrato del extracto, plan de ingesta, carga idempotente y los assets
+        # materializados en proceso contra un warehouse falso.
+        run: pytest -q

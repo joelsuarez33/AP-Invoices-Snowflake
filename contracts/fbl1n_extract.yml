@@ -1,0 +1,55 @@
+# Contrato del extracto FBL1N (partidas individuales de acreedores).
+#
+# Es la fuente unica del layout: config.py arma de aca las columnas que usan el
+# generador, normalize.py y load.py, y el schema check de Dagster valida contra
+# este mismo archivo cada extracto antes de cargarlo.
+#
+# Reglas del schema check (contract.py):
+#   - columna del contrato que falta en el archivo  -> ERROR: no se carga
+#   - valor con un tipo distinto al declarado        -> ERROR: no se carga
+#   - columna del archivo que el contrato no conoce  -> WARN: se ignora
+#
+# `since` versiona el contrato: una columna con `since` solo es obligatoria
+# para extractos de esa fecha en adelante. Los anteriores se cargan sin ella y
+# staging la deriva (ver stg_fbl1n__items).
+#
+# Tipos:
+#   string   texto
+#   code     identificador SAP: entero o texto, nunca un decimal ni una fecha.
+#            Los exports de SAP mezclan los dos para un mismo campo (GKONT
+#            llega como numero en el baseline y como texto en otros dias).
+#   integer  entero (un float sin decimales tambien cuenta)
+#   decimal  importe numerico
+#   date     fecha (celda de fecha de Excel)
+
+version: 2
+sheet: Sheet1
+
+columns:
+  - {header: "Icono part.abiertas/comp.", field: ICON_STATUS, type: string}
+  - {header: "Acreedor", field: LIFNR, type: code}
+  - {header: "Clave de referencia", field: KIDNO, type: code}
+  - {header: "Referencia", field: XBLNR, type: code}
+  - {header: "Nº documento", field: BELNR, type: code}
+  - {header: "Clave referencia 1", field: XREF1, type: string}
+  - {header: "Vía de pago", field: ZLSCH, type: string}
+  - {header: "Bloqueo de pago", field: ZLSPR, type: string}
+  - {header: "Demora tras vencimiento neto", field: VERZN, type: integer}
+  - {header: "Importe en moneda doc.", field: WRBTR, type: decimal}
+  - {header: "Moneda del documento", field: WAERS, type: string}
+  - {header: "Importe en moneda local", field: DMBTR, type: decimal}
+  - {header: "Moneda local", field: HWAER, type: string}
+  - {header: "Fecha de documento", field: BLDAT, type: date}
+  - {header: "Fe.contabilización", field: BUDAT, type: date}
+  - {header: "Vencimiento neto", field: NETDT, type: date}
+  - {header: "Fecha compensación", field: AUGDT, type: date}
+  - {header: "Doc.compensación", field: AUGBL, type: code}
+  - {header: "Clase de documento", field: BLART, type: string}
+  - {header: "Nombre del usuario", field: USNAM, type: string}
+  - {header: "Cta.contrapartida", field: GKONT, type: code}
+  # Version 2: la variante de layout agrega la clave completa del documento
+  # contable. En SAP, BELNR solo es unico dentro de una sociedad y un
+  # ejercicio, y la posicion distingue las lineas de un mismo documento.
+  - {header: "Sociedad", field: BUKRS, type: code, since: 2026-10-07}
+  - {header: "Ejercicio", field: GJAHR, type: integer, since: 2026-10-07}
+  - {header: "Posición", field: BUZEI, type: integer, since: 2026-10-07}

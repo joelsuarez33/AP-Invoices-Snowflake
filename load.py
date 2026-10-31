@@ -6,18 +6,22 @@ de carga. Un mismo BELNR termina con varias filas en RAW -- la version original
 y cada re-emision -- y ese historial es lo que hace auditable el merge de la
 capa mart. La resolucion a estado actual ocurre en staging, no aca.
 
-Idempotencia
-------------
-La provee Snowflake: COPY INTO registra los archivos ya cargados en el load
-history del stage y los ignora en corridas posteriores, con una ventana de 64
-dias. Por eso el PUT usa OVERWRITE=FALSE y el COPY no lleva FORCE. Implementar
-deduplicacion propia seria reescribir peor algo que el motor ya garantiza.
+Idempotencia por particion
+--------------------------
+La particion es el dia del extracto (_extract_date). Cargar un dia es, en una
+sola transaccion, borrar las filas de ese dia y copiar su archivo con FORCE.
+Reprocesar un dia deja exactamente las filas de su extracto, ni una mas: no
+depende del load history de COPY INTO, que vence a los 64 dias (ADR-014).
+
+RAW sigue siendo append-only entre dias: una particion solo reemplaza las
+filas de su propio extracto, nunca las versiones que trajeron otros dias.
 
 Costo
 -----
-Una sola conexion y un solo COPY por corrida: cada resume del warehouse
-factura un minimo de 60 segundos, asi que abrir una conexion por archivo
-multiplicaria el costo del backfill por la cantidad de dias.
+Una sola conexion por corrida, con un DELETE + COPY por particion: cada
+resume del warehouse factura un minimo de 60 segundos, asi que abrir una
+conexion por archivo multiplicaria el costo del backfill por la cantidad de
+dias.
 
 Uso
 ---
@@ -30,8 +34,10 @@ Uso
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import logging
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -125,24 +131,43 @@ def connect() -> Any:
 # ---------------------------------------------------------------------------
 # SQL
 # ---------------------------------------------------------------------------
+def raw_table(objects: dict[str, str]) -> str:
+    return f"{objects['database']}.{objects['schema_raw']}.{objects['raw_table']}"
+
+
 def put_statement(path: Path, stage: str) -> str:
     # Snowflake espera URI con barras normales, tambien en Windows.
+    # OVERWRITE = TRUE: reprocesar un dia reemplaza su archivo en el stage. La
+    # deduplicacion no depende del stage sino del DELETE por particion.
     uri = path.resolve().as_posix()
     return (
         f"PUT 'file://{uri}' @{stage} "
         "AUTO_COMPRESS = TRUE "
-        "OVERWRITE = FALSE "
+        "OVERWRITE = TRUE "
         "PARALLEL = 4"
     )
 
 
-def copy_statement(objects: dict[str, str]) -> str:
-    """COPY INTO con transformacion: agrega la metadata de carga a cada fila."""
+def ensure_columns_statements(objects: dict[str, str]) -> list[str]:
+    """Agrega a RAW las columnas del contrato que todavia no tiene.
+
+    Es la mitad del manejo de cambios de schema que puede automatizarse sin
+    riesgo: agregar una columna STRING no rompe nada aguas abajo. Quitar o
+    retipar una columna, en cambio, lo frena el schema check antes de llegar
+    aca.
+    """
+    return [
+        f"ALTER TABLE {raw_table(objects)} ADD COLUMN IF NOT EXISTS {column} STRING"
+        for column in config.RAW_COLUMNS
+    ]
+
+
+def copy_statement(objects: dict[str, str], staged_file: str) -> str:
+    """COPY INTO de un unico archivo, con FORCE: la particion ya se borro antes."""
     business_columns = ",\n".join(f"        {col}" for col in config.RAW_COLUMNS)
     staged_columns = ",\n".join(f"        t.${i + 1}" for i in range(len(config.RAW_COLUMNS)))
-    target = f"{objects['database']}.{objects['schema_raw']}.{objects['raw_table']}"
     return f"""
-COPY INTO {target} (
+COPY INTO {raw_table(objects)} (
 {business_columns},
         _SOURCE_FILE,
         _FILE_ROW_NUMBER,
@@ -158,10 +183,50 @@ FROM (
         {EXTRACT_DATE_EXPR}
     FROM @{objects['stage']} t
 )
-PATTERN = '.*FBL1N_[0-9]{{8}}[.]csv([.]gz)?'
+FILES = ('{staged_file}')
 FILE_FORMAT = (FORMAT_NAME = '{objects['file_format']}')
 ON_ERROR = 'ABORT_STATEMENT'
+FORCE = TRUE
 """.strip()
+
+
+def delete_partition_statement(objects: dict[str, str]) -> str:
+    return f"DELETE FROM {raw_table(objects)} WHERE _EXTRACT_DATE = %(extract_date)s"
+
+
+@dataclass(frozen=True)
+class PartitionLoad:
+    extract_date: dt.date
+    rows_deleted: int
+    rows_loaded: int
+
+
+def load_partition(cursor: Any, objects: dict[str, str], csv_path: Path) -> PartitionLoad:
+    """Carga un dia de forma idempotente: DELETE de la particion + COPY de su archivo.
+
+    El PUT va antes y afuera de la transaccion porque no es transaccional; el
+    DELETE y el COPY van juntos: si el COPY falla, el ROLLBACK deja el dia como
+    estaba y no queda una particion a medio cargar.
+    """
+    extract_date = dt.datetime.strptime(staging_date(csv_path), "%Y%m%d").date()
+    cursor.execute(put_statement(csv_path, objects["stage"]))
+    cursor.fetchall()
+
+    cursor.execute("BEGIN")
+    try:
+        cursor.execute(delete_partition_statement(objects), {"extract_date": extract_date})
+        deleted = cursor.rowcount or 0
+        cursor.execute(copy_statement(objects, f"{csv_path.name}.gz"))
+        loaded = 0
+        for row in cursor.fetchall():
+            # Una fila por archivo: (file, status, rows_parsed, rows_loaded, ...)
+            if len(row) >= 4:
+                loaded += int(row[3] or 0)
+        cursor.execute("COMMIT")
+    except BaseException:
+        cursor.execute("ROLLBACK")
+        raise
+    return PartitionLoad(extract_date, deleted, loaded)
 
 
 # ---------------------------------------------------------------------------
@@ -197,43 +262,30 @@ def run(args: argparse.Namespace) -> int:
         log.info("No hay CSV para cargar en %s", config.STAGING_DIR)
         return 0
 
-    log.info("Archivos a ingestar: %d (%s -> %s)", len(files), files[0].name, files[-1].name)
-    copy_sql = copy_statement(objects)
+    log.info("Particiones a cargar: %d (%s -> %s)", len(files), files[0].name, files[-1].name)
 
     if args.dry_run:
+        for statement in ensure_columns_statements(objects):
+            log.info("[dry-run] %s", statement)
         for path in files:
             log.info("[dry-run] %s", put_statement(path, objects["stage"]))
-        log.info("[dry-run] %s", copy_sql)
+            log.info("[dry-run] %s", delete_partition_statement(objects))
+            log.info("[dry-run] %s", copy_statement(objects, f"{path.name}.gz"))
         return 0
 
+    # Una sola conexion para todas las particiones: cada resume del warehouse
+    # factura 60 segundos como minimo.
     connection = connect()
     try:
         with connection.cursor() as cursor:
+            for statement in ensure_columns_statements(objects):
+                cursor.execute(statement)
             for path in files:
-                cursor.execute(put_statement(path, objects["stage"]))
-                for row in cursor.fetchall():
-                    # (source, target, source_size, target_size, source_compression,
-                    #  target_compression, status, message)
-                    log.info("PUT %s -> %s [%s]", row[0], row[1], row[6])
-
-            log.info("COPY INTO %s", objects["raw_table"])
-            cursor.execute(copy_sql)
-            results = cursor.fetchall()
-
-        # Sin archivos nuevos, COPY no devuelve cero filas: devuelve una sola fila
-        # de una columna, "Copy executed with 0 files processed.". Solo las filas
-        # con el detalle por archivo traen status y conteos.
-        file_results = [row for row in results if len(row) >= 4]
-        if not file_results:
-            log.info("Sin archivos nuevos: el load history del stage ya los registro.")
-            return 0
-
-        loaded = 0
-        for row in file_results:
-            file_name, status, rows_parsed, rows_loaded = row[0], row[1], row[2], row[3]
-            loaded += int(rows_loaded or 0)
-            log.info("%s | %s | parsed=%s loaded=%s", file_name, status, rows_parsed, rows_loaded)
-        log.info("Filas agregadas a RAW: %d", loaded)
+                result = load_partition(cursor, objects, path)
+                log.info(
+                    "%s | borradas=%d cargadas=%d",
+                    result.extract_date, result.rows_deleted, result.rows_loaded,
+                )
     finally:
         connection.close()
     return 0

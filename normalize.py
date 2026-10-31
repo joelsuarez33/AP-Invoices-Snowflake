@@ -33,12 +33,14 @@ import csv
 import datetime as dt
 import logging
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import openpyxl
 
 import config
+from contract import SchemaReport, check_extract, to_contract_record
 from generate_extract import extract_date_from_filename
 
 log = logging.getLogger("normalize")
@@ -83,27 +85,17 @@ def read_workbook(path: Path) -> list[tuple[Any, ...]]:
         workbook.close()
 
 
-def validate_header(path: Path, header: tuple[Any, ...]) -> None:
-    actual = tuple("" if c is None else str(c).strip() for c in header)
-    if actual == config.EXCEL_HEADERS:
-        return
-    if len(actual) != len(config.EXCEL_HEADERS):
-        raise ContractError(
-            f"{path.name}: el extracto trae {len(actual)} columnas y el contrato define "
-            f"{len(config.EXCEL_HEADERS)}"
-        )
-    diffs = [
-        f"  posicion {i + 1}: esperado {expected!r}, encontrado {found!r}"
-        for i, (expected, found) in enumerate(zip(config.EXCEL_HEADERS, actual, strict=True))
-        if expected != found
-    ]
-    raise ContractError(f"{path.name}: encabezados fuera de contrato\n" + "\n".join(diffs))
+def _position(header: tuple[Any, ...], field: str) -> int:
+    """Posicion de un campo del contrato en el encabezado de este archivo."""
+    wanted = config.EXCEL_HEADERS[config.COL_INDEX[field]]
+    names = ["" if h is None else str(h).strip() for h in header]
+    return names.index(wanted)
 
 
 def split_detail_and_total(
-    path: Path, rows: list[tuple[Any, ...]]
+    path: Path, header: tuple[Any, ...], rows: list[tuple[Any, ...]]
 ) -> tuple[list[tuple[Any, ...]], tuple[Any, ...]]:
-    icon = config.COL_INDEX["ICON_STATUS"]
+    icon = _position(header, "ICON_STATUS")
     detail = [r for r in rows if r[icon] != config.TOTAL_ROW_MARKER]
     totals = [r for r in rows if r[icon] == config.TOTAL_ROW_MARKER]
 
@@ -117,10 +109,12 @@ def split_detail_and_total(
     return detail, totals[0]
 
 
-def validate_checksum(path: Path, detail: list[tuple[Any, ...]], total_row: tuple[Any, ...]) -> float:
+def validate_checksum(
+    path: Path, header: tuple[Any, ...], detail: list[tuple[Any, ...]], total_row: tuple[Any, ...]
+) -> float:
     """Compara la suma de DMBTR del detalle contra la fila de totales."""
-    local = config.COL_INDEX["DMBTR"]
-    doc = config.COL_INDEX["WRBTR"]
+    local = _position(header, "DMBTR")
+    doc = _position(header, "WRBTR")
 
     declared = total_row[local]
     if declared is None:
@@ -158,32 +152,70 @@ def validate_checksum(path: Path, detail: list[tuple[Any, ...]], total_row: tupl
     return declared
 
 
-def write_csv(path: Path, detail: list[tuple[Any, ...]]) -> None:
+def write_csv(path: Path, header: tuple[Any, ...], detail: list[tuple[Any, ...]]) -> None:
+    """CSV en el orden del contrato, siempre con todas sus columnas.
+
+    Una columna que el archivo no trae (anterior a su `since`) va vacia; una
+    que el contrato no conoce no se escribe. Asi el CSV tiene el mismo ancho
+    que la tabla RAW sea cual sea la version del extracto.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle, lineterminator="\n", quoting=csv.QUOTE_MINIMAL)
         writer.writerow(config.RAW_COLUMNS)
         for row in detail:
-            writer.writerow(
-                [_format_cell(column, value) for column, value in zip(config.RAW_COLUMNS, row, strict=True)]
-            )
+            record = to_contract_record(header, row, config.CONTRACT)
+            writer.writerow([_format_cell(column, record[column]) for column in config.RAW_COLUMNS])
 
 
-def normalize_file(source: Path, staging_dir: Path) -> Path:
+@dataclass
+class InspectedExtract:
+    """Un extracto leido y validado contra el contrato, todavia sin escribir."""
+
+    source: Path
+    extract_date: dt.date
+    header: tuple[Any, ...]
+    detail: list[tuple[Any, ...]]
+    total_row: tuple[Any, ...]
+    report: SchemaReport
+
+
+def inspect_extract(source: Path) -> InspectedExtract:
+    """Lee el extracto y lo compara contra el contrato, sin decidir nada.
+
+    Separado de normalize_file para que el schema check de Dagster reporte el
+    resultado completo (con avisos incluidos) antes de que se cargue nada.
+    """
     extract_date = extract_date_from_filename(source)
     rows = read_workbook(source)
     if not rows:
         raise ContractError(f"{source.name}: archivo vacio")
+    header = rows[0]
+    try:
+        detail, total_row = split_detail_and_total(source, header, rows[1:])
+    except ValueError as exc:
+        # Sin la columna del icono no se puede separar la fila de totales: el
+        # reporte del contrato dice por que.
+        report = check_extract(header, [], extract_date, config.CONTRACT)
+        raise ContractError(f"{source.name}: {report.summary() or exc}") from exc
+    report = check_extract(header, detail, extract_date, config.CONTRACT)
+    return InspectedExtract(source, extract_date, header, detail, total_row, report)
 
-    validate_header(source, rows[0])
-    detail, total_row = split_detail_and_total(source, rows[1:])
-    validate_checksum(source, detail, total_row)
+
+def normalize_file(source: Path, staging_dir: Path) -> Path:
+    inspected = inspect_extract(source)
+    if inspected.report.blocking:
+        raise ContractError(f"{source.name}: {inspected.report.summary()}")
+    if inspected.report.has_warnings:
+        log.warning("%s: %s", source.name, inspected.report.summary())
+
+    validate_checksum(source, inspected.header, inspected.detail, inspected.total_row)
 
     target = staging_dir / config.STAGING_FILENAME_TEMPLATE.format(
-        yyyymmdd=extract_date.strftime("%Y%m%d")
+        yyyymmdd=inspected.extract_date.strftime("%Y%m%d")
     )
-    write_csv(target, detail)
-    log.info("%s -> %s (%d filas)", source.name, target.name, len(detail))
+    write_csv(target, inspected.header, inspected.detail)
+    log.info("%s -> %s (%d filas)", source.name, target.name, len(inspected.detail))
     return target
 
 

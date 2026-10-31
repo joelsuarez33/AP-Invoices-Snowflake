@@ -28,6 +28,12 @@ vars:
   # Rango del calendario de dim_date.
   date_spine_start: '2026-01-01'
   date_spine_end: '2027-12-31'
+  # Clave del documento para extractos anteriores al contrato v2, que no la
+  # traen. Mismos valores que config.DEFAULT_COMPANY_CODE / DEFAULT_LINE_ITEM.
+  default_company_code: '1000'
+  default_line_item: 1
+  # extract_window_start / extract_window_end: los pasa Dagster por particion
+  # (ver fct_ap_open_items). Sin default a proposito.
 
 models:
   dbt_ap:

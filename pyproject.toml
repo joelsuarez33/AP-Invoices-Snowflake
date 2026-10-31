@@ -27,7 +27,19 @@ ignore = [
 "scripts/enrich_baseline.py" = ["ALL"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["config"]
+known-first-party = ["config", "contract", "generate_extract", "load", "normalize", "orchestration", "agent", "tests"]
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.pytest.ini_options]
+# Tests de la logica de ingesta, el contrato y los assets de Dagster. Ninguno
+# se conecta a Snowflake: los assets corren contra un warehouse falso.
+testpaths = ["tests"]
+pythonpath = ["."]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.dagster]
+# `dagster dev` sin argumentos carga estas Definitions.
+module_name = "orchestration.definitions"
+code_location_name = "ap_invoices"

@@ -30,6 +30,22 @@ with source as (
 casted as (
 
     select
+        -- --- clave del documento contable (contrato v2) ---
+        -- En SAP, BELNR solo es unico dentro de una sociedad y un ejercicio, y
+        -- BUZEI distingue las lineas de un documento. Los extractos anteriores
+        -- a la version 2 del contrato no traen las tres columnas: se derivan
+        -- con los mismos valores que generate_extract.with_document_key, para
+        -- que un documento re-emitido colapse con su version anterior.
+        coalesce(
+            {{ sap_to_text('bukrs') }}, '{{ var("default_company_code") }}'
+        )                                as bukrs,
+        coalesce(
+            {{ sap_to_integer('gjahr') }}, year({{ sap_to_date('budat') }})
+        )                                as gjahr,
+        coalesce(
+            {{ sap_to_integer('buzei') }}, {{ var("default_line_item") }}
+        )                                as buzei,
+
         -- --- claves ---
         {{ sap_to_text('belnr') }}       as belnr,
         {{ sap_to_text('kidno') }}       as kidno,
@@ -106,6 +122,6 @@ select * from derived
 -- reconstruir su universo de documentos: si las dos difirieran, el pipeline
 -- no seria verificable contra su origen.
 qualify row_number() over (
-        partition by belnr
+        partition by bukrs, belnr, gjahr, buzei
         order by _extract_date desc, _file_row_number desc
     ) = 1

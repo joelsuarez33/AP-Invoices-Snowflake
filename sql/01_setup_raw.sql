@@ -76,6 +76,11 @@ CREATE TABLE IF NOT EXISTS FBL1N_ITEMS (
     BLART             STRING COMMENT 'Clase de documento',
     USNAM             STRING COMMENT 'Usuario que contabilizo',
     GKONT             STRING COMMENT 'Cuenta de contrapartida',
+    -- Contrato v2: clave completa del documento. Vacias en extractos anteriores
+    -- a 2026-10-07; stg_fbl1n__items las deriva.
+    BUKRS             STRING COMMENT 'Sociedad',
+    GJAHR             STRING COMMENT 'Ejercicio',
+    BUZEI             STRING COMMENT 'Posicion del documento',
 
     -- --- metadata de carga ---
     _SOURCE_FILE      STRING       NOT NULL COMMENT 'METADATA$FILENAME del stage',

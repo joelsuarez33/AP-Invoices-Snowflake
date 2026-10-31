@@ -54,7 +54,10 @@ joined as (
 
     select
         -- --- claves ---
+        items.bukrs,
         items.belnr,
+        items.gjahr,
+        items.buzei,
         items.kidno,
         items.lifnr,
         items.xblnr,
