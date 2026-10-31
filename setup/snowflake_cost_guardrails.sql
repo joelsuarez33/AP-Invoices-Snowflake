@@ -8,10 +8,13 @@
 -- existan (sql/00_setup_account.sql los crea con una version anterior de estos
 -- mismos limites).
 --
+-- Requiere haber corrido antes sql/00_setup_account.sql, que crea la base, los
+-- schemas y el usuario de servicio AP_PIPELINE_SVC con su clave publica.
+--
 -- Antes de correrlo, reemplazar:
---   <<ADMIN_USER>>      usuario que recibe los avisos del resource monitor
---                       (tiene que tener el email verificado en Snowflake)
---   <<RSA_PUBLIC_KEY>>  contenido de rsa_key.pub, sin las lineas BEGIN/END
+--   <<ADMIN_USER>>      usuario humano que recibe los avisos del resource
+--                       monitor (tiene que tener el email verificado en
+--                       Snowflake; un usuario TYPE = SERVICE no recibe mails)
 -- =============================================================================
 
 USE ROLE ACCOUNTADMIN;
@@ -98,14 +101,13 @@ GRANT USAGE, CREATE TABLE              ON SCHEMA AP_ANALYTICS.SEEDS        TO RO
 -- -----------------------------------------------------------------------------
 -- 4. Usuario de servicio: solo key-pair, sin password
 -- -----------------------------------------------------------------------------
--- TYPE = SERVICE no admite password ni login interactivo: la unica forma de
--- autenticarse es la clave privada que corresponde a esta clave publica.
-CREATE USER IF NOT EXISTS AP_PIPELINE_SVC
+-- El usuario lo crea sql/00_setup_account.sql con su clave publica; aca solo
+-- se fijan sus defaults. TYPE = SERVICE no admite password ni login
+-- interactivo: la unica forma de autenticarse es la clave privada.
+ALTER USER AP_PIPELINE_SVC SET
     TYPE              = SERVICE
     DEFAULT_ROLE      = AP_PIPELINE
-    DEFAULT_WAREHOUSE = AP_WH
-    RSA_PUBLIC_KEY    = '<<RSA_PUBLIC_KEY>>'
-    COMMENT = 'Usuario de servicio del pipeline (GitHub Actions y local).';
+    DEFAULT_WAREHOUSE = AP_WH;
 
 GRANT ROLE AP_PIPELINE TO USER AP_PIPELINE_SVC;
 
