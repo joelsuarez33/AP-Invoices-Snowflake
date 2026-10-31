@@ -11,10 +11,9 @@
 -- Requiere haber corrido antes sql/00_setup_account.sql, que crea la base, los
 -- schemas y el usuario de servicio AP_PIPELINE_SVC con su clave publica.
 --
--- Antes de correrlo, reemplazar:
---   <<ADMIN_USER>>      usuario humano que recibe los avisos del resource
---                       monitor (tiene que tener el email verificado en
---                       Snowflake; un usuario TYPE = SERVICE no recibe mails)
+-- NOTIFY_USERS (seccion 2) es el usuario humano que recibe los avisos del
+-- resource monitor: tiene que tener el email verificado en Snowflake. Un
+-- usuario TYPE = SERVICE no recibe mails.
 -- =============================================================================
 
 USE ROLE ACCOUNTADMIN;
@@ -51,7 +50,7 @@ CREATE RESOURCE MONITOR IF NOT EXISTS AP_RM
 
 ALTER RESOURCE MONITOR AP_RM SET
     CREDIT_QUOTA = 10
-    NOTIFY_USERS = (<<ADMIN_USER>>)
+    NOTIFY_USERS = (joelsuarez3470)
     TRIGGERS
         ON 50  PERCENT DO NOTIFY
         ON 80  PERCENT DO NOTIFY
