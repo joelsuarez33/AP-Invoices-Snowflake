@@ -99,11 +99,11 @@ def fx_covers(dates: list[dt.date]) -> bool:
 
 
 def ensure_fx_rates(dates: list[dt.date], log: Any) -> None:
-    """Completa la serie del BCRA si no cubre los dias a generar.
+    """Completa la serie de cotizaciones si no cubre los dias a generar (ADR-016).
 
-    Si la API no responde (desde los runners de GitHub devuelve 403), alcanza
-    con que el seed commiteado cubra los dias. Si no los cubre, se corta aca y
-    no se genera nada con una serie incompleta.
+    Si la fuente no responde, alcanza con que el seed commiteado cubra los
+    dias. Si no los cubre, se corta aca y no se genera nada con una serie
+    incompleta.
     """
     if fx_covers(dates):
         return
@@ -113,9 +113,9 @@ def ensure_fx_rates(dates: list[dt.date], log: Any) -> None:
     if not fx_covers(dates):
         raise dg.Failure(
             description=(
-                f"El seed de cotizaciones no cubre hasta el {max(dates)} y la API del BCRA no "
-                "respondio. Correr `python scripts/update_fx_rates.py` desde una red con acceso "
-                "y commitear dbt_ap/seeds/fx_rates.csv."
+                f"El seed de cotizaciones no cubre hasta el {max(dates)} y no se pudo "
+                "completar. Correr `python scripts/update_fx_rates.py` y commitear "
+                "dbt_ap/seeds/fx_rates.csv."
             )
         )
 

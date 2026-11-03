@@ -1,32 +1,39 @@
-"""Reescribe dbt_ap/seeds/fx_rates.csv con las cotizaciones oficiales del BCRA.
+"""Completa dbt_ap/seeds/fx_rates.csv hasta ayer con cotizaciones diarias de ARS.
 
-Fuente: API de estadisticas cambiarias del Banco Central de la Republica
-Argentina (https://api.bcra.gob.ar/estadisticascambiarias/v1.0/Cotizaciones),
-campo `tipoCotizacion`: pesos por unidad de moneda extranjera.
+Fuentes (ADR-016)
+-----------------
+- Hasta 2026-10-18: serie oficial del BCRA (API de estadisticas cambiarias,
+  `tipoCotizacion`). Esas filas ya estan en el seed y no se tocan.
+- Desde 2026-10-19: currency-api (https://github.com/fawazahmed0/exchange-api),
+  un archivo JSON por dia publicado en el CDN de jsDelivr, con espejo en
+  Cloudflare Pages. El BCRA puso Cloudflare delante de su API y rechaza a
+  cualquier cliente que no sea un navegador (error 1010); lo mismo pasa con
+  datos.gob.ar, ArgentinaDatos y Bluelytics. currency-api se sirve como archivos
+  estaticos versionados por fecha y no tiene ese bloqueo.
 
-Hasta 2026-10 la serie era sintetica (un random walk con drift) y se habia
-alejado de la real: al 2026-10-06 el dolar sintetico estaba en 1.770,78 y el
-real en 1.520. Desde este script, la unica fuente de cotizaciones del proyecto
-es el BCRA.
+  Contra el BCRA, en los dias que se superponen, la diferencia es menor a 0,5 %
+  en USD y a 1 % en EUR. EUR/ARS sale del cruce: (ARS por USD) / (EUR por USD).
 
-La API publica dias habiles. El seed necesita un valor por dia calendario: el
-generador busca la cotizacion exacta de BLDAT, y int_ap_items_enriched hace el
-join por fecha. Un fin de semana o un feriado toma la ultima cotizacion habil
-anterior, que es la que estaba vigente ese dia.
+Las filas existentes nunca se reescriben. Cambiar una cotizacion ya usada haria
+que el generador re-exprese todos los documentos de esa fecha (ADR-012). Solo se
+agregan los dias que faltan, asi que dos corridas con la misma fecha producen el
+mismo archivo: los archivos de currency-api de una fecha no cambian.
 
-El archivo se reescribe entero, desde SERIES_START hasta --hasta (por defecto,
-ayer en hora argentina). Las cotizaciones historicas no cambian, asi que dos
-corridas con la misma fecha producen el mismo archivo.
+El seed necesita un valor por dia calendario: el generador busca la cotizacion
+exacta de BLDAT, y int_ap_items_enriched hace el join por fecha. Sabado y domingo
+toman la cotizacion del ultimo dia habil, igual que en la serie del BCRA. Un dia
+habil sin archivo publicado tambien arrastra la anterior, con un aviso.
 
 Uso
 ---
     python scripts/update_fx_rates.py                    # hasta ayer
-    python scripts/update_fx_rates.py --hasta 2026-10-16
+    python scripts/update_fx_rates.py --hasta 2026-10-30
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import datetime as dt
 import json
 import ssl
@@ -40,23 +47,22 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SEED_PATH = REPO_ROOT / "dbt_ap" / "seeds" / "fx_rates.csv"
 
-API = "https://api.bcra.gob.ar/estadisticascambiarias/v1.0/Cotizaciones/{currency}"
+# Primero el CDN de jsDelivr; si falla, el espejo de la misma publicacion.
+SOURCES = (
+    "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@{date}/v1/currencies/usd.json",
+    "https://{date}.currency-api.pages.dev/v1/currencies/usd.json",
+)
 CURRENCIES = ("USD", "EUR")
 LOCAL_CURRENCY = "ARS"
-
-# Mismo inicio que dim_date (date_spine_start en dbt_project.yml).
-SERIES_START = dt.date(2026, 1, 1)
-# Margen hacia atras para tener una cotizacion habil vigente el 1 de enero,
-# que es feriado.
-LOOKBACK_DAYS = 15
-PAGE_SIZE = 1000
+# Mismos decimales que publicaba el BCRA.
+DECIMALS = 4
 
 # Argentina no tiene horario de verano: UTC-3 todo el ano.
 AR_TZ = dt.timezone(dt.timedelta(hours=-3))
 
 
 class FxError(RuntimeError):
-    """La serie del BCRA no se pudo obtener completa."""
+    """La serie no se pudo completar."""
 
 
 def _ssl_context() -> ssl.SSLContext:
@@ -67,70 +73,90 @@ def _ssl_context() -> ssl.SSLContext:
     return ssl.create_default_context(cafile=certifi.where())
 
 
-def _get(url: str, retries: int = 3) -> dict[str, Any]:
+def _get(url: str, retries: int = 3) -> dict[str, Any] | None:
+    """El JSON de la URL, o None si el archivo de esa fecha no existe (404)."""
     context = _ssl_context()
     for attempt in range(1, retries + 1):
         try:
             with urllib.request.urlopen(url, timeout=30, context=context) as response:
                 return json.load(response)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return None
+            if attempt == retries:
+                raise FxError(f"No se pudo consultar {url}: HTTP {exc.code}") from exc
         except (urllib.error.URLError, TimeoutError) as exc:
             if attempt == retries:
                 raise FxError(f"No se pudo consultar {url}: {exc}") from exc
-            time.sleep(2 * attempt)
+        time.sleep(2 * attempt)
     raise AssertionError("inalcanzable")
 
 
-def fetch(currency: str, since: dt.date, until: dt.date) -> dict[dt.date, float]:
-    """Cotizaciones habiles de una moneda, paginando hasta traer todo el rango."""
-    rates: dict[dt.date, float] = {}
-    offset = 0
-    while True:
-        url = (
-            API.format(currency=currency)
-            + f"?fechadesde={since.isoformat()}&fechahasta={until.isoformat()}"
-            + f"&limit={PAGE_SIZE}&offset={offset}"
-        )
-        payload = _get(url)
-        if payload.get("status") != 200:
-            raise FxError(f"El BCRA respondio {payload.get('status')} para {currency}: {payload}")
-        for result in payload["results"]:
-            detail = next(d for d in result["detalle"] if d["codigoMoneda"] == currency)
-            rates[dt.date.fromisoformat(result["fecha"])] = float(detail["tipoCotizacion"])
-        total = payload["metadata"]["resultset"]["count"]
-        offset += PAGE_SIZE
-        if offset >= total:
-            return rates
+def fetch_day(day: dt.date) -> dict[str, float] | None:
+    """Pesos por unidad de cada moneda publicados para `day`, o None si no hay archivo."""
+    errors: list[str] = []
+    for template in SOURCES:
+        try:
+            payload = _get(template.format(date=day.isoformat()))
+        except FxError as exc:
+            errors.append(str(exc))
+            continue
+        if payload is None:
+            continue
+        per_usd = payload["usd"]
+        ars_per_usd = float(per_usd["ars"])
+        return {
+            "USD": round(ars_per_usd, DECIMALS),
+            "EUR": round(ars_per_usd / float(per_usd["eur"]), DECIMALS),
+        }
+    if errors:
+        raise FxError("; ".join(errors))
+    return None
 
 
-def daily_series(business: dict[dt.date, float], start: dt.date, end: dt.date) -> dict[dt.date, float]:
-    """Un valor por dia calendario: cada dia toma la ultima cotizacion habil vigente."""
-    if not business or min(business) > start:
-        raise FxError(f"La serie no tiene una cotizacion vigente al {start}.")
-    series: dict[dt.date, float] = {}
-    current: float | None = None
-    day = min(business)
-    while day <= end:
-        current = business.get(day, current)
-        if day >= start:
-            series[day] = current
+def read_seed() -> dict[dt.date, dict[str, float]]:
+    rows: dict[dt.date, dict[str, float]] = {}
+    with SEED_PATH.open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            day = dt.date.fromisoformat(row["rate_date"])
+            rows.setdefault(day, {})[row["currency"]] = float(row["rate_to_ars"])
+    return rows
+
+
+def extend(
+    seed: dict[dt.date, dict[str, float]], until: dt.date
+) -> list[tuple[dt.date, dict[str, float], str]]:
+    """Dias que faltan entre el ultimo del seed y `until`, con el origen de cada valor."""
+    last = max(seed)
+    current = {c: seed[last][c] for c in CURRENCIES}
+    added = []
+    day = last + dt.timedelta(days=1)
+    while day <= until:
+        origin = "fin de semana"
+        if day.weekday() < 5:
+            published = fetch_day(day)
+            if published is None:
+                origin = "sin archivo publicado"
+                print(f"AVISO: {day} sin cotizacion publicada; se arrastra la anterior.")
+            else:
+                current, origin = published, "currency-api"
+        added.append((day, dict(current), origin))
         day += dt.timedelta(days=1)
-    return series
+    return added
 
 
-def write_seed(series: dict[str, dict[dt.date, float]], start: dt.date, end: dt.date) -> int:
-    lines = ["rate_date,currency,rate_to_ars"]
-    day = start
-    while day <= end:
+def append_rows(added: list[tuple[dt.date, dict[str, float], str]]) -> None:
+    lines = []
+    for day, rates, _ in added:
         lines.append(f"{day.isoformat()},{LOCAL_CURRENCY},1.0")
         for currency in CURRENCIES:
-            lines.append(f"{day.isoformat()},{currency},{series[currency][day]:.6f}")
-        day += dt.timedelta(days=1)
-    SEED_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return len(lines) - 1
+            lines.append(f"{day.isoformat()},{currency},{rates[currency]:.6f}")
+    with SEED_PATH.open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write("\n".join(lines) + "\n")
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Actualiza el seed de cotizaciones desde el BCRA.")
+    parser = argparse.ArgumentParser(description="Completa el seed de cotizaciones hasta una fecha.")
     parser.add_argument(
         "--hasta",
         type=dt.date.fromisoformat,
@@ -140,20 +166,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    seed = read_seed()
+    last = max(seed)
+    if last >= args.hasta:
+        print(f"{SEED_PATH.relative_to(REPO_ROOT)} ya cubre hasta {last}.")
+        return 0
+
     try:
-        series = {}
-        for currency in CURRENCIES:
-            business = fetch(currency, SERIES_START - dt.timedelta(days=LOOKBACK_DAYS), args.hasta)
-            series[currency] = daily_series(business, SERIES_START, args.hasta)
-            last = max(business)
-            print(f"{currency}: {len(business)} dias habiles, ultima cotizacion {last} "
-                  f"= {business[last]:,.4f}")
+        added = extend(seed, args.hasta)
     except FxError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    rows = write_seed(series, SERIES_START, args.hasta)
-    print(f"{SEED_PATH.relative_to(REPO_ROOT)}: {rows} filas, {SERIES_START} -> {args.hasta}")
+    append_rows(added)
+    for day, rates, origin in added:
+        print(f"{day}  USD {rates['USD']:>12,.4f}  EUR {rates['EUR']:>12,.4f}  ({origin})")
+    print(f"{SEED_PATH.relative_to(REPO_ROOT)}: +{len(added)} dias, {last} -> {args.hasta}")
     return 0
 
 

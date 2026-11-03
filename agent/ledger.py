@@ -94,7 +94,7 @@ def fetch_state(refresh: bool = False) -> dict[str, Any]:
 def advance() -> str:
     """Avanza la proyeccion local hasta ayer, con los mismos pasos que el pipeline.
 
-    Actualiza las cotizaciones del BCRA, parte del estado de artifacts si el
+    Completa las cotizaciones hasta ayer, parte del estado de artifacts si el
     pipeline esta mas adelantado que la proyeccion, y corre el generador.
     Devuelve el ultimo dia generado.
     """

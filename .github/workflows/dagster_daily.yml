@@ -113,13 +113,14 @@ jobs:
             echo "Sin estado publicado: se usa el estado inicial del repo."
           fi
 
-      - name: Actualizar cotizaciones del BCRA
-        # La API del BCRA responde 403 a los runners de GitHub. No es fatal: si
-        # el seed commiteado cubre los dias a generar, alcanza. Si no los
-        # cubre, el asset fbl1n_extract corta con un mensaje que dice que hacer.
+      - name: Completar cotizaciones hasta ayer
+        # currency-api via jsDelivr (ADR-016); las filas que ya estan en el seed
+        # no se tocan. No es fatal: si el seed commiteado cubre los dias a
+        # generar, alcanza. Si no los cubre, el asset fbl1n_extract corta con
+        # un mensaje que dice que hacer.
         run: |
           python scripts/update_fx_rates.py \
-            || echo "::warning::La API del BCRA no respondio; se usa el seed de cotizaciones commiteado."
+            || echo "::warning::No se pudieron completar las cotizaciones; se usa el seed commiteado."
 
       - name: dbt deps + dbt parse
         # El manifest que lee @dbt_assets al cargar las Definitions.

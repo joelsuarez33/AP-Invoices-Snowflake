@@ -1,10 +1,11 @@
 # Registro de decisiones
 
-Quince decisiones del pipeline, cada una con contexto, decision, alternativas
+Dieciseis decisiones del pipeline, cada una con contexto, decision, alternativas
 descartadas y consecuencias. Las ocho primeras son de diseno, las tres
 siguientes salen de fallas que detectaron los tests de dbt, la 012 reemplaza la
-serie de cotizaciones sintetica por la oficial del BCRA, y las tres ultimas
-llegan con Dagster como orquestador.
+serie de cotizaciones sintetica por la oficial del BCRA, de la 013 a la 015
+llegan con Dagster como orquestador, y la 016 cambia la fuente de las
+cotizaciones nuevas cuando el BCRA cerro su API a los scripts.
 
 Los numeros son de Snowflake al 2026-09-13, con el ledger al 2026-09-12: 67
 extractos diarios, 9.023 filas en RAW, 7.002 documentos.
@@ -26,6 +27,7 @@ extractos diarios, 9.023 filas en RAW, 7.002 documentos.
 | 013 | Dagster como orquestador: assets particionados por dia, backfills en una sola corrida |
 | 014 | Idempotencia por particion: DELETE + COPY en una transaccion (reemplaza en parte a 008) |
 | 015 | Contrato del extracto versionado, validado antes de cargar, y clave completa del documento |
+| 016 | Cotizaciones nuevas desde currency-api; la serie del BCRA queda congelada (modifica a 012) |
 
 ---
 
@@ -767,3 +769,60 @@ unico dentro de una sociedad (`BUKRS`) y un ejercicio (`GJAHR`), y la posicion
 - Reprocesar un extracto v1 con el contrato v2 funciona: el `since` lo permite y
   staging deriva la clave.
 - dbt pasa de 142 a 146 tests. pytest cubre el contrato caso por caso.
+
+---
+
+## ADR-016 — Cotizaciones nuevas desde currency-api; la serie del BCRA queda congelada
+
+### Contexto
+
+Desde fines de 2026-10 la API de estadisticas cambiarias del BCRA responde 403
+con `error code: 1010` de Cloudflare a cualquier cliente que no sea un
+navegador: a los runners de GitHub y tambien a una PC. Ese codigo indica un
+rechazo por la firma del cliente, no por la URL ni por los parametros. Las
+alternativas argentinas (la API de series de datos.gob.ar, ArgentinaDatos y
+Bluelytics) devuelven el mismo bloqueo.
+
+El seed quedo en el 2026-10-18 y, como el asset `fbl1n_extract` no genera dias
+sin cotizacion, el pipeline fallo todos los dias desde el 2026-11-01.
+
+### Decision
+
+- Las filas del seed hasta el 2026-10-18 (BCRA) quedan congeladas.
+- Los dias siguientes salen de currency-api
+  (https://github.com/fawazahmed0/exchange-api). Publica un JSON por fecha en el
+  CDN de jsDelivr (`@fawazahmed0/currency-api@YYYY-MM-DD`), con espejo en
+  Cloudflare Pages, sin clave ni bloqueo de clientes. USD/ARS es `usd.ars`, y
+  EUR/ARS sale del cruce `usd.ars / usd.eur`. Se redondea a 4 decimales, como
+  el BCRA.
+- `scripts/update_fx_rates.py` solo agrega los dias que faltan hasta ayer;
+  nunca reescribe una fila existente. Sabado y domingo arrastran la cotizacion
+  del viernes. Un dia habil sin archivo publicado tambien arrastra la anterior,
+  con un aviso.
+
+### Alternativas descartadas
+
+- **Hacerse pasar por un navegador** (cambiar el User-Agent o imitar la firma
+  TLS) para pasar el bloqueo del BCRA. Es eludir un control anti-bots que el
+  BCRA puso a proposito.
+- **Bajar la planilla del BCRA a mano y escribir un importador.** Mantiene la
+  serie oficial, pero el pipeline diario quedaria atado a una tarea manual.
+- **Arrastrar la ultima cotizacion conocida y corregir despues.** Valores
+  inventados en el tablero durante dias o semanas, sin fecha de correccion.
+- **Reconstruir toda la serie con la fuente nueva.** Cambiaria cotizaciones ya
+  usadas, y el generador re-expresaria miles de documentos (ADR-012) por
+  diferencias de redondeo entre fuentes.
+- **Frankfurter / BCE.** El BCE no publica ARS.
+
+### Consecuencias
+
+- La serie deja de ser oficial desde el 2026-10-19. En los dias que se
+  superponen (14 al 18 de octubre), currency-api difiere del BCRA en menos de
+  0,5 % en USD y en menos de 1 % en EUR. Para un dataset sintetico alcanza; en
+  una empresa real la fuente seria la cotizacion contable que use la sociedad.
+- Agregar sin reescribir hace al seed idempotente: dos corridas con la misma
+  fecha dan el mismo archivo, porque los archivos fechados de currency-api no
+  cambian.
+- No hay re-expresiones: ninguna cotizacion ya usada cambia.
+- Si el BCRA vuelve a abrir la API, cambiar de fuente es otra decision, con su
+  propio evento de re-expresion.

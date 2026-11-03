@@ -7,7 +7,7 @@ sobre una base DuckDB local (`agent/ledger.py`).
 
 ```powershell
 pip install -r requirements.txt -r requirements-agent.txt
-python -m agent.ledger --avanzar       # cotizaciones del BCRA + ledger hasta ayer
+python -m agent.ledger --avanzar       # cotizaciones + ledger hasta ayer
 python -m agent.chat                   # sesion interactiva
 python -m agent.chat --pregunta "..."  # una pregunta y sale
 ```

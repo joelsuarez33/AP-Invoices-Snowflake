@@ -165,7 +165,9 @@ unico lugar que castea es `stg_fbl1n__items`.
 Estos numeros son con la serie de cotizaciones sintetica original. Desde
 2026-10 la serie es la oficial del BCRA, y los 2.315 documentos en moneda
 extranjera se re-expresaron a esa cotizacion como un evento del change feed
-([ADR-012](docs/DECISIONS.md)). Los valores al dia y como verificarlos estan en
+([ADR-012](docs/DECISIONS.md)). Desde el 2026-10-19 los dias nuevos salen de
+currency-api, porque la API del BCRA bloquea a los clientes automatizados
+([ADR-016](docs/DECISIONS.md)). Los valores al dia y como verificarlos estan en
 [docs/AGENTE.md](docs/AGENTE.md).
 
 ---
@@ -446,7 +448,7 @@ conviven dos orquestaciones que carguen lo mismo). Corre todos los dias a las
 1. Escribe la clave privada del secret a un archivo temporal con permisos 600;
    los pasos siguientes solo reciben la ruta. Al final se borra siempre.
 2. Restaura el estado del generador y el archivo de extractos desde la rama
-   `artifacts`, e intenta actualizar las cotizaciones del BCRA.
+   `artifacts`, e intenta completar las cotizaciones hasta ayer (ADR-016).
 3. `dbt parse` y `dagster job execute -j fbl1n_daily` sobre los dias pendientes
    (o sobre ayer, si no hay pendientes: es idempotente).
 4. Publica estado, extractos, `manifest.json` y `run_results.json` en
