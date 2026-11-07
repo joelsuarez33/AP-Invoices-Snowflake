@@ -1,10 +1,5 @@
 [
   {
-    "as_of_date": "2026-08-07",
-    "open_items": 3546,
-    "open_amount_local": -14522364152.1
-  },
-  {
     "as_of_date": "2026-08-08",
     "open_items": 3537,
     "open_amount_local": -14456197438.28
@@ -282,176 +277,181 @@
   {
     "as_of_date": "2026-10-02",
     "open_items": 3544,
-    "open_amount_local": -14786912700.99
+    "open_amount_local": -14786215058.69
   },
   {
     "as_of_date": "2026-10-03",
     "open_items": 3534,
-    "open_amount_local": -14783007661.28
+    "open_amount_local": -14782310018.98
   },
   {
     "as_of_date": "2026-10-04",
     "open_items": 3544,
-    "open_amount_local": -14798509478.44
+    "open_amount_local": -14797811836.14
   },
   {
     "as_of_date": "2026-10-05",
     "open_items": 3541,
-    "open_amount_local": -14713616430.2
+    "open_amount_local": -14712918787.9
   },
   {
     "as_of_date": "2026-10-06",
     "open_items": 3537,
-    "open_amount_local": -14712620236.58
+    "open_amount_local": -14711922594.28
   },
   {
     "as_of_date": "2026-10-07",
     "open_items": 3534,
-    "open_amount_local": -14736857938.38
+    "open_amount_local": -14736160296.08
   },
   {
     "as_of_date": "2026-10-08",
     "open_items": 3533,
-    "open_amount_local": -14791010154.41
+    "open_amount_local": -14790312512.11
   },
   {
     "as_of_date": "2026-10-09",
     "open_items": 3538,
-    "open_amount_local": -14798580127.87
+    "open_amount_local": -14797882485.57
   },
   {
     "as_of_date": "2026-10-10",
     "open_items": 3543,
-    "open_amount_local": -14792079516.22
+    "open_amount_local": -14791381873.92
   },
   {
     "as_of_date": "2026-10-11",
     "open_items": 3535,
-    "open_amount_local": -14789181184.1
+    "open_amount_local": -14788483541.8
   },
   {
     "as_of_date": "2026-10-12",
     "open_items": 3542,
-    "open_amount_local": -14843286441.88
+    "open_amount_local": -14842588799.58
   },
   {
     "as_of_date": "2026-10-13",
     "open_items": 3536,
-    "open_amount_local": -14804630994.9
+    "open_amount_local": -14803933352.6
   },
   {
     "as_of_date": "2026-10-14",
     "open_items": 3532,
-    "open_amount_local": -14815676969.48
+    "open_amount_local": -14814979327.18
   },
   {
     "as_of_date": "2026-10-15",
-    "open_items": 3526,
-    "open_amount_local": -14816339382.03
+    "open_items": 3527,
+    "open_amount_local": -14816364699.19
   },
   {
     "as_of_date": "2026-10-16",
-    "open_items": 3535,
-    "open_amount_local": -14847341649.36
+    "open_items": 3536,
+    "open_amount_local": -14847366966.52
   },
   {
     "as_of_date": "2026-10-17",
-    "open_items": 3535,
-    "open_amount_local": -14862902462.35
+    "open_items": 3536,
+    "open_amount_local": -14862927779.51
   },
   {
     "as_of_date": "2026-10-18",
-    "open_items": 3540,
-    "open_amount_local": -14848507378.31
+    "open_items": 3541,
+    "open_amount_local": -14848532695.47
   },
   {
     "as_of_date": "2026-10-19",
-    "open_items": 3544,
-    "open_amount_local": -14868171358.49
+    "open_items": 3545,
+    "open_amount_local": -14868196675.65
   },
   {
     "as_of_date": "2026-10-20",
-    "open_items": 3532,
-    "open_amount_local": -14731603110.75
+    "open_items": 3533,
+    "open_amount_local": -14731628427.91
   },
   {
     "as_of_date": "2026-10-21",
-    "open_items": 3533,
-    "open_amount_local": -14803104825.75
+    "open_items": 3534,
+    "open_amount_local": -14803130142.91
   },
   {
     "as_of_date": "2026-10-22",
-    "open_items": 3524,
-    "open_amount_local": -14766507231.31
+    "open_items": 3525,
+    "open_amount_local": -14766532548.47
   },
   {
     "as_of_date": "2026-10-23",
-    "open_items": 3524,
-    "open_amount_local": -14720813381.08
+    "open_items": 3525,
+    "open_amount_local": -14720838698.24
   },
   {
     "as_of_date": "2026-10-24",
-    "open_items": 3524,
-    "open_amount_local": -14682835065.46
+    "open_items": 3525,
+    "open_amount_local": -14682860382.62
   },
   {
     "as_of_date": "2026-10-25",
-    "open_items": 3523,
-    "open_amount_local": -14766175611.46
+    "open_items": 3524,
+    "open_amount_local": -14766200928.62
   },
   {
     "as_of_date": "2026-10-26",
-    "open_items": 3519,
-    "open_amount_local": -14772584922.39
+    "open_items": 3520,
+    "open_amount_local": -14772610239.55
   },
   {
     "as_of_date": "2026-10-27",
-    "open_items": 3521,
-    "open_amount_local": -14749258266.9
+    "open_items": 3522,
+    "open_amount_local": -14749283584.06
   },
   {
     "as_of_date": "2026-10-28",
-    "open_items": 3521,
-    "open_amount_local": -14767119509.46
+    "open_items": 3522,
+    "open_amount_local": -14767144826.62
   },
   {
     "as_of_date": "2026-10-29",
-    "open_items": 3527,
-    "open_amount_local": -14799055447.21
+    "open_items": 3528,
+    "open_amount_local": -14799080764.37
   },
   {
     "as_of_date": "2026-10-30",
-    "open_items": 3525,
-    "open_amount_local": -14815225053.39
+    "open_items": 3526,
+    "open_amount_local": -14815250370.55
   },
   {
     "as_of_date": "2026-10-31",
-    "open_items": 3531,
-    "open_amount_local": -14855287566.48
+    "open_items": 3532,
+    "open_amount_local": -14855312883.64
   },
   {
     "as_of_date": "2026-11-01",
-    "open_items": 3533,
-    "open_amount_local": -14838971153.44
+    "open_items": 3534,
+    "open_amount_local": -14838996470.6
   },
   {
     "as_of_date": "2026-11-02",
-    "open_items": 3532,
-    "open_amount_local": -14832875677.54
+    "open_items": 3533,
+    "open_amount_local": -14832900994.7
   },
   {
     "as_of_date": "2026-11-03",
-    "open_items": 3523,
-    "open_amount_local": -14815646729.43
+    "open_items": 3524,
+    "open_amount_local": -14815672046.59
   },
   {
     "as_of_date": "2026-11-04",
-    "open_items": 3520,
-    "open_amount_local": -14814915867.13
+    "open_items": 3521,
+    "open_amount_local": -14814941184.29
   },
   {
     "as_of_date": "2026-11-05",
-    "open_items": 3523,
-    "open_amount_local": -14900649853.38
+    "open_items": 3524,
+    "open_amount_local": -14900675170.54
+  },
+  {
+    "as_of_date": "2026-11-06",
+    "open_items": 3519,
+    "open_amount_local": -14872665479.46
   }
 ]
