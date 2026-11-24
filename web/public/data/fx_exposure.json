@@ -1,22 +1,22 @@
 [
   {
     "currency": "USD",
-    "open_items": 745,
-    "amount_document_currency": -2141216.28,
-    "amount_local_at_document_date": -3115708993.87,
-    "amount_local_at_cutoff": -3350377600.64,
-    "fx_revaluation_local": -234668606.77,
-    "avg_fx_drift_pct": 8.03,
-    "fx_rate_at_cutoff": 1564.7077
+    "open_items": 741,
+    "amount_document_currency": -2130646.06,
+    "amount_local_at_document_date": -3099983245.84,
+    "amount_local_at_cutoff": -3365405735.09,
+    "fx_revaluation_local": -265422489.25,
+    "avg_fx_drift_pct": 9.06,
+    "fx_rate_at_cutoff": 1579.5236
   },
   {
     "currency": "EUR",
-    "open_items": 374,
-    "amount_document_currency": -974716.06,
-    "amount_local_at_document_date": -1619034855.02,
-    "amount_local_at_cutoff": -1675564101.85,
-    "fx_revaluation_local": -56529246.83,
-    "avg_fx_drift_pct": 3.45,
-    "fx_rate_at_cutoff": 1719.0279
+    "open_items": 375,
+    "amount_document_currency": -990042.91,
+    "amount_local_at_document_date": -1645659186.24,
+    "amount_local_at_cutoff": -1720293115.19,
+    "fx_revaluation_local": -74633928.95,
+    "avg_fx_drift_pct": 4.55,
+    "fx_rate_at_cutoff": 1737.5945
   }
 ]
