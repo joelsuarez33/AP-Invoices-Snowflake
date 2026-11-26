@@ -1,11 +1,11 @@
 {
-  "ledger_cutoff_date": "2026-11-24",
-  "items_total": 9136,
+  "ledger_cutoff_date": "2026-11-25",
+  "items_total": 9167,
   "items_open": 3631,
-  "items_cleared": 5505,
-  "open_amount_local": -15565706637.41,
-  "overdue_amount_local": -11782422918.19,
-  "items_overdue": 2785,
-  "fx_revaluation_local": -327910869.84,
+  "items_cleared": 5536,
+  "open_amount_local": -15519632937.41,
+  "overdue_amount_local": -11804017706.93,
+  "items_overdue": 2783,
+  "fx_revaluation_local": -372342580.0,
   "vendors_with_items": 40
 }

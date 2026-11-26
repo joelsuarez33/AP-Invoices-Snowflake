@@ -2,43 +2,43 @@
   {
     "aging_bucket": "No vencida",
     "aging_bucket_sort": 1,
-    "items": 817,
-    "amount_local": -3622887414.49,
-    "avg_days_overdue": -15.8
+    "items": 816,
+    "amount_local": -3529359546.26,
+    "avg_days_overdue": -15.9
   },
   {
     "aging_bucket": "Vence hoy",
     "aging_bucket_sort": 2,
-    "items": 29,
-    "amount_local": -160396304.73,
+    "items": 32,
+    "amount_local": -186255684.22,
     "avg_days_overdue": 0.0
   },
   {
     "aging_bucket": "1-30",
     "aging_bucket_sort": 3,
-    "items": 570,
-    "amount_local": -2503240352.88,
-    "avg_days_overdue": 12.7
+    "items": 568,
+    "amount_local": -2543776066.84,
+    "avg_days_overdue": 12.6
   },
   {
     "aging_bucket": "31-60",
     "aging_bucket_sort": 4,
     "items": 67,
-    "amount_local": -285134503.46,
-    "avg_days_overdue": 41.1
+    "amount_local": -266193578.24,
+    "avg_days_overdue": 41.3
   },
   {
     "aging_bucket": "61-90",
     "aging_bucket_sort": 5,
     "items": 28,
     "amount_local": -74331675.6,
-    "avg_days_overdue": 75.4
+    "avg_days_overdue": 76.4
   },
   {
     "aging_bucket": "90+",
     "aging_bucket_sort": 6,
     "items": 2120,
     "amount_local": -8919716386.25,
-    "avg_days_overdue": 209.3
+    "avg_days_overdue": 210.3
   }
 ]
