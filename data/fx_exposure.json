@@ -1,0 +1,22 @@
+[
+  {
+    "currency": "USD",
+    "open_items": 737,
+    "amount_document_currency": -2156181.7,
+    "amount_local_at_document_date": -3142782314.39,
+    "amount_local_at_cutoff": -3456364224.3,
+    "fx_revaluation_local": -313581909.91,
+    "avg_fx_drift_pct": 10.6,
+    "fx_rate_at_cutoff": 1603.0023
+  },
+  {
+    "currency": "EUR",
+    "open_items": 381,
+    "amount_document_currency": -998691.93,
+    "amount_local_at_document_date": -1660793666.88,
+    "amount_local_at_cutoff": -1757333374.16,
+    "fx_revaluation_local": -96539707.28,
+    "avg_fx_drift_pct": 5.79,
+    "fx_rate_at_cutoff": 1759.6351
+  }
+]
